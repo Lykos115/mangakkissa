@@ -1,0 +1,387 @@
+<!-- PROTOTYPE (throwaway): three variants of the manga reading screen, switchable via ?variant= (A/B/C) or [ ] keys.
+     Standalone page — no app exists yet. Settles: RTL spread pairing + shift, advance direction, click zones,
+     fit modes, pre-joined wide spreads, end-of-chapter transition. Mock chapters mimic Witch Hat ch. 40 (26pp, wide p23) + 40f (18pp). -->
+<title>Reader prototype — spreads, navigation, fit</title>
+<style>
+  :root {
+    --bg: #141119; --surface: #1f1a28; --surface-2: #2a2336;
+    --ink: #eae5f2; --muted: #93899f; --line: #3a3149;
+    --gold: #d8a94e; --gold-ink: #141119;
+    --paper: #f5f0e6; --shadow: rgba(0,0,0,.55);
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: #e9e5dc; --surface: #f7f4ec; --surface-2: #efe9db;
+      --ink: #292433; --muted: #6e6678; --line: #d4ccbc;
+      --gold: #8a6420; --gold-ink: #f7f4ec; --shadow: rgba(60,50,30,.35);
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #141119; --surface: #1f1a28; --surface-2: #2a2336;
+    --ink: #eae5f2; --muted: #93899f; --line: #3a3149;
+    --gold: #d8a94e; --gold-ink: #141119; --shadow: rgba(0,0,0,.55);
+  }
+  :root[data-theme="light"] {
+    --bg: #e9e5dc; --surface: #f7f4ec; --surface-2: #efe9db;
+    --ink: #292433; --muted: #6e6678; --line: #d4ccbc;
+    --gold: #8a6420; --gold-ink: #f7f4ec; --shadow: rgba(60,50,30,.35);
+  }
+  html, body { height: 100%; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+    overflow: hidden;
+  }
+  .serif { font-family: "Iowan Old Style", Palatino, "Palatino Linotype", Georgia, serif; }
+  button {
+    font: inherit; color: var(--ink); background: var(--surface);
+    border: 1px solid var(--line); border-radius: 6px; padding: 4px 10px; cursor: pointer;
+  }
+  button:hover { background: var(--surface-2); }
+  button:focus-visible, .zone:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+  button.gold { background: var(--gold); color: var(--gold-ink); border-color: transparent; font-weight: 600; }
+  #app { position: fixed; inset: 0; display: flex; flex-direction: column; }
+
+  /* ---------- stage + fit modes ---------- */
+  .stage { position: relative; flex: 1; min-height: 0; display: flex; }
+  .scroller { flex: 1; min-width: 0; display: flex; }
+  .spread { margin: auto; display: flex; flex-direction: row-reverse; justify-content: center; align-items: center; }
+  .spread img { display: block; background: var(--paper); box-shadow: 0 4px 24px var(--shadow); }
+  .fit-height .scroller { overflow: hidden; }
+  .fit-height .spread { height: 100%; }
+  .fit-height .spread img { height: 100%; width: auto; }
+  .fit-width .scroller { overflow-y: auto; overflow-x: hidden; }
+  .fit-width .spread { width: 100%; align-items: flex-start; }
+  .fit-width .spread img { width: 50%; height: auto; }
+  .fit-width .spread img.wide, .fit-width .spread.solo img { width: 100%; }
+  .fit-width .spread.solo:not(.widespread) img { width: 50%; }
+  .fit-original .scroller { overflow: auto; }
+  .fit-original .spread img { width: auto; height: auto; }
+
+  .zone { position: absolute; top: 0; bottom: 0; width: 30%; background: none; border: 0; border-radius: 0; padding: 0; cursor: pointer; z-index: 5; }
+  .zone:hover { background: none; }
+  .zone.next { left: 0; } .zone.prev { right: 0; }
+  .zone.mid { left: 30%; width: 40%; cursor: default; }
+
+  /* ---------- variant A: immersive overlay ---------- */
+  .ovl { position: absolute; left: 0; right: 0; z-index: 6; display: flex; align-items: center; gap: 10px;
+         padding: 10px 14px; transition: opacity .18s; }
+  .ovl.top { top: 0; background: linear-gradient(color-mix(in srgb, var(--bg) 88%, transparent), transparent); }
+  .ovl.bot { bottom: 0; justify-content: flex-end; background: linear-gradient(transparent, color-mix(in srgb, var(--bg) 88%, transparent)); }
+  .ovl.hidden { opacity: 0; pointer-events: none; }
+  .ovl .title { font-size: 16px; }
+  .ovl .count { color: var(--muted); font-variant-numeric: tabular-nums; }
+  .spacer { flex: 1; }
+
+  /* ---------- variant B: console bar ---------- */
+  .bar { display: flex; align-items: center; gap: 10px; padding: 8px 14px;
+         background: var(--surface); border-bottom: 1px solid var(--line); z-index: 6; flex-wrap: wrap; }
+  .bar .title { font-size: 16px; margin-right: 4px; }
+  .bar .count { color: var(--muted); font-variant-numeric: tabular-nums; }
+  .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+  .seg button { border: 0; border-radius: 0; background: var(--surface); padding: 4px 10px; }
+  .seg button.on { background: var(--gold); color: var(--gold-ink); font-weight: 600; }
+
+  /* ---------- variant C: filmstrip ---------- */
+  .strip-wrap { background: var(--surface); border-top: 1px solid var(--line); z-index: 6; }
+  .progress { height: 3px; background: var(--line); }
+  .progress > div { height: 100%; background: var(--gold); }
+  .strip { display: flex; gap: 8px; padding: 8px 12px; overflow-x: auto; align-items: center; }
+  .thumb { display: flex; flex-direction: row-reverse; gap: 1px; padding: 2px; border: 2px solid transparent;
+           border-radius: 4px; background: none; flex: none; }
+  .thumb img { height: 64px; width: auto; background: var(--paper); display: block; }
+  .thumb.on { border-color: var(--gold); }
+  .strip .divider { flex: none; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .08em;
+                    border-left: 1px solid var(--line); padding: 8px 4px 8px 12px; max-width: 90px; }
+  .ctitle { position: absolute; top: 10px; left: 14px; right: 14px; z-index: 6; display: flex; gap: 10px; align-items: baseline; }
+  .ctitle .count { color: var(--muted); font-variant-numeric: tabular-nums; }
+
+  /* ---------- interstitial / end card ---------- */
+  .card { margin: auto; text-align: center; max-width: 34em; padding: 32px; background: var(--surface);
+          border: 1px solid var(--line); border-radius: 10px; }
+  .card h2 { margin: 0 0 6px; font-size: 22px; text-wrap: balance; }
+  .card p { color: var(--muted); margin: 6px 0 16px; }
+
+  /* ---------- toast ---------- */
+  .toast { position: fixed; top: 18px; left: 50%; transform: translateX(-50%); z-index: 40;
+           background: var(--surface); border: 1px solid var(--line); border-radius: 999px;
+           padding: 7px 18px; box-shadow: 0 4px 18px var(--shadow); opacity: 0; transition: opacity .25s; }
+  .toast.show { opacity: 1; }
+  @media (prefers-reduced-motion: reduce) { .toast, .ovl { transition: none; } }
+
+  /* ---------- prototype switcher (not part of the design) ---------- */
+  .proto { position: fixed; bottom: 14px; left: 50%; transform: translateX(-50%); z-index: 50;
+           display: flex; align-items: center; gap: 2px; background: var(--ink); color: var(--bg);
+           border-radius: 999px; padding: 4px 6px; box-shadow: 0 4px 18px var(--shadow); font-size: 13px; }
+  .proto button { background: none; border: 0; color: inherit; padding: 2px 8px; border-radius: 999px; font-weight: 700; }
+  .proto button:hover { background: color-mix(in srgb, var(--bg) 22%, transparent); }
+  .proto .lbl { padding: 0 6px; white-space: nowrap; }
+  .proto .hint { opacity: .55; padding-right: 6px; }
+
+  /* ---------- help ---------- */
+  .help { position: fixed; inset: 0; z-index: 45; background: color-mix(in srgb, var(--bg) 72%, transparent);
+          display: flex; }
+  .help .card { text-align: left; }
+  .help table { border-collapse: collapse; margin: 10px 0; }
+  .help td { padding: 3px 14px 3px 0; }
+  .help kbd { background: var(--surface-2); border: 1px solid var(--line); border-radius: 4px; padding: 1px 6px;
+              font-family: ui-monospace, monospace; font-size: 12px; }
+</style>
+
+<div id="app"></div>
+<div class="toast" id="toast" role="status"></div>
+
+<script>
+"use strict";
+/* ---------------- mock content ---------------- */
+function pageSVG(chLabel, n, wide) {
+  const W = wide ? 1600 : 800, H = wide ? 1142 : 1149;
+  const panels = [];
+  let seed = n * 7 + chLabel.length;
+  const rnd = () => (seed = (seed * 9301 + 49297) % 233280) / 233280;
+  const cols = wide ? 4 : 2, rows = 3, m = 26, gap = 14;
+  const pw = (W - m * 2 - gap * (cols - 1)) / cols, ph = (H - 150 - m - gap * (rows - 1)) / rows;
+  for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+    if (rnd() < 0.18) continue;
+    panels.push(`<rect x="${m + c * (pw + gap)}" y="${110 + r * (ph + gap)}" width="${pw}" height="${ph}" fill="none" stroke="#4a4436" stroke-width="3"/>`);
+  }
+  const label = wide ? "PRE-JOINED DOUBLE-PAGE SPREAD" : `${chLabel} · page ${n}`;
+  const svg =
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">` +
+    `<rect width="${W}" height="${H}" fill="#f5f0e6"/>` +
+    `<rect x="6" y="6" width="${W - 12}" height="${H - 12}" fill="none" stroke="#d8cfba" stroke-width="2"/>` +
+    (wide ? `<line x1="${W / 2}" y1="6" x2="${W / 2}" y2="${H - 6}" stroke="#d8cfba" stroke-width="2" stroke-dasharray="8 8"/>` : "") +
+    panels.join("") +
+    `<text x="${W / 2}" y="${H / 2 + 40}" font-family="Georgia,serif" font-size="${wide ? 220 : 200}" fill="#3b3427" text-anchor="middle" font-weight="bold">${n}${wide ? "–" + (n + 1) : ""}</text>` +
+    `<text x="${W / 2}" y="64" font-family="Georgia,serif" font-size="30" fill="#8a8064" text-anchor="middle">${label}</text>` +
+    `<text x="${W - 30}" y="${H - 28}" font-family="Georgia,serif" font-size="24" fill="#b3a88b" text-anchor="end">◀ read this way</text>` +
+    `</svg>`;
+  return "data:image/svg+xml," + encodeURIComponent(svg);
+}
+function makeChapter(title, count, wideAt, next, prev) {
+  const pages = [];
+  for (let i = 1; i <= count; i++) {
+    const wide = i === wideAt;
+    pages.push({ n: i, wide, src: pageSVG(title, i, wide) });
+    if (wide) { pages[pages.length - 1].n2 = i + 1; i++; } // joined spread consumes two page numbers
+  }
+  return { title, pages, next, prev };
+}
+const CHAPTERS = [
+  makeChapter("Chapter 40", 26, 23, 1, null),
+  makeChapter("Chapter 40f", 18, null, null, 0),
+];
+const SERIES = "Witch Hat Atelier";
+
+/* ---------------- pairing (the domain logic under test) ---------------- */
+function buildSpreads(pages, shift) {
+  const spreads = []; let buf = [];
+  const flush = () => { if (buf.length) { spreads.push(buf); buf = []; } };
+  pages.forEach((p, i) => {
+    if (p.wide) { flush(); spreads.push([p]); return; }   // pre-joined spread stands alone
+    if (i === 0 && shift) { spreads.push([p]); return; }  // shift: first page displayed solo (cover)
+    buf.push(p);
+    if (buf.length === 2) flush();
+  });
+  flush();
+  return spreads;
+}
+
+/* ---------------- shared state (survives variant switch) ---------------- */
+const G = { ci: 0, si: 0, fit: "height", shift: 1, ovl: true, mode: "read", help: false };
+// mode: "read" | "interstitial" (B only) | "fin"
+const VARIANTS = [["A", "Immersive"], ["B", "Console"], ["C", "Scrubber"]];
+let variant = new URLSearchParams(location.search).get("variant") || "A";
+if (!VARIANTS.some(v => v[0] === variant)) variant = "A";
+
+const $app = document.getElementById("app");
+const $toast = document.getElementById("toast");
+let toastTimer = null;
+function toast(msg) {
+  $toast.textContent = msg; $toast.classList.add("show");
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => $toast.classList.remove("show"), 1600);
+}
+const chapter = () => CHAPTERS[G.ci];
+const spreads = () => buildSpreads(chapter().pages, G.shift);
+
+/* ---------------- navigation ---------------- */
+function advance() {
+  if (G.mode === "fin") return;
+  if (G.mode === "interstitial") { gotoChapter(chapter().next, "advance"); return; }
+  const s = spreads();
+  if (G.si < s.length - 1) { G.si++; render(); return; }
+  // end of chapter
+  if (chapter().next == null) { G.mode = "fin"; render(); return; }
+  if (variant === "B") { G.mode = "interstitial"; render(); return; }
+  gotoChapter(chapter().next, "advance"); // A, C: seamless
+}
+function back() {
+  if (G.mode === "fin" || G.mode === "interstitial") { G.mode = "read"; render(); return; }
+  if (G.si > 0) { G.si--; render(); return; }
+  if (chapter().prev != null) {
+    G.ci = chapter().prev; G.si = spreads().length - 1; render();
+    toast("Back into " + chapter().title);
+  }
+}
+function gotoChapter(ci, why) {
+  G.ci = ci; G.si = 0; G.mode = "read"; render();
+  if (why === "advance" && variant !== "B") toast("▶ " + chapter().title);
+}
+function setVariant(v, push) {
+  variant = v; G.mode = G.mode === "interstitial" ? "read" : G.mode;
+  const u = new URL(location); u.searchParams.set("variant", v); history.replaceState(null, "", u);
+  render();
+}
+function cycleVariant(d) {
+  const i = VARIANTS.findIndex(x => x[0] === variant);
+  setVariant(VARIANTS[(i + d + VARIANTS.length) % VARIANTS.length][0]);
+}
+const FITS = [["height", "Fit height"], ["width", "Fit width"], ["original", "1:1"]];
+function cycleFit() {
+  const i = FITS.findIndex(f => f[0] === G.fit);
+  G.fit = FITS[(i + 1) % FITS.length][0]; render(); toast(FITS.find(f => f[0] === G.fit)[1]);
+}
+function toggleShift() {
+  G.shift = G.shift ? 0 : 1;
+  const s = spreads(); if (G.si > s.length - 1) G.si = s.length - 1;
+  render(); toast(G.shift ? "Pairing shifted: page 1 solo" : "Pairing: 1+2 together");
+}
+
+/* ---------------- rendering ---------------- */
+function el(html) { const t = document.createElement("template"); t.innerHTML = html.trim(); return t.content.firstChild; }
+function counterText() {
+  const s = spreads();
+  return G.mode === "read" ? `spread ${G.si + 1} / ${s.length}` : "";
+}
+function spreadNode() {
+  const s = spreads();
+  if (G.mode === "interstitial") {
+    const next = CHAPTERS[chapter().next];
+    return el(`<div class="card"><h2 class="serif">End of ${chapter().title}</h2>
+      <p>Next: <b>${next.title}</b> — advance again to continue, or go back to re-read.</p>
+      <button class="gold" data-act="advance">Continue to ${next.title}</button></div>`);
+  }
+  if (G.mode === "fin") {
+    return el(`<div class="card"><h2 class="serif">You're caught up</h2>
+      <p>${chapter().title} is the latest chapter of ${SERIES}.</p>
+      <button data-act="back">Re-read last spread</button> <button class="gold">Back to library (mock)</button></div>`);
+  }
+  const sp = s[G.si];
+  const solo = sp.length === 1, wide = solo && sp[0].wide;
+  const imgs = sp.map(p =>
+    `<img class="${p.wide ? "wide" : ""}" alt="page ${p.n}" src="${p.src}">`).join("");
+  return el(`<div class="spread ${solo ? "solo" : ""} ${wide ? "widespread" : ""}">${imgs}</div>`);
+}
+function zones() {
+  return `<button class="zone next" data-act="advance" aria-label="next spread" title="next (◀)"></button>
+          <button class="zone prev" data-act="back" aria-label="previous spread" title="previous (▶)"></button>`;
+}
+function render() {
+  const s = spreads(), c = chapter();
+  let html = "";
+  if (variant === "A") {
+    html = `<div class="stage fit-${G.fit}">
+      <div class="ovl top ${G.ovl ? "" : "hidden"}">
+        <span class="title serif">${SERIES} — ${c.title}</span><span class="count">${counterText()}</span>
+        <span class="spacer"></span><button data-act="help">?</button>
+      </div>
+      <div class="scroller"></div>${G.mode === "read" ? zones() : ""}
+      ${G.mode === "read" ? `<button class="zone mid" data-act="ovl" aria-label="toggle controls" tabindex="-1"></button>` : ""}
+      <div class="ovl bot ${G.ovl ? "" : "hidden"}">
+        <button data-act="fit">${FITS.find(f => f[0] === G.fit)[1]} (f)</button>
+        <button data-act="shift">Shift pairing (p)${G.shift ? " ✓" : ""}</button>
+      </div></div>`;
+  } else if (variant === "B") {
+    const fitSeg = FITS.map(f => `<button data-fit="${f[0]}" class="${G.fit === f[0] ? "on" : ""}">${f[1]}</button>`).join("");
+    html = `<div class="bar">
+        <span class="title serif">${SERIES} — ${c.title}</span><span class="count">${counterText()}</span>
+        <span class="spacer"></span>
+        <span class="seg">${fitSeg}</span>
+        <button data-act="shift">Shift pairing${G.shift ? " ✓" : ""}</button>
+        <button data-act="prevch" ${c.prev == null ? "disabled" : ""}>‹ prev ch.</button>
+        <button data-act="nextch" ${c.next == null ? "disabled" : ""}>next ch. ›</button>
+        <button data-act="help">?</button>
+      </div>
+      <div class="stage fit-${G.fit}"><div class="scroller"></div>${G.mode === "read" ? zones() : ""}</div>`;
+  } else { // C
+    const mkThumb = (ci, spr, idx, cur) => `<button class="thumb ${cur ? "on" : ""}" data-jump="${ci}:${idx}">` +
+      spr.map(p => `<img alt="" src="${p.src}">`).join("") + `</button>`;
+    const cur = s.map((spr, i) => mkThumb(G.ci, spr, i, i === G.si && G.mode === "read")).join("");
+    let nextThumbs = "";
+    if (c.next != null) {
+      const ns = buildSpreads(CHAPTERS[c.next].pages, G.shift);
+      nextThumbs = `<span class="divider">${CHAPTERS[c.next].title}</span>` +
+        ns.map((spr, i) => mkThumb(c.next, spr, i, false)).join("");
+    }
+    html = `<div class="stage fit-${G.fit}">
+        <div class="ctitle"><span class="title serif">${SERIES} — ${c.title}</span><span class="count">${counterText()}</span>
+        <span class="spacer"></span><button data-act="fit">${FITS.find(f => f[0] === G.fit)[1]}</button>
+        <button data-act="shift">Shift${G.shift ? " ✓" : ""}</button><button data-act="help">?</button></div>
+        <div class="scroller"></div>${G.mode === "read" ? zones() : ""}</div>
+      <div class="strip-wrap">
+        <div class="progress"><div style="width:${G.mode === "read" ? ((G.si + 1) / s.length) * 100 : 100}%"></div></div>
+        <div class="strip">${cur}${nextThumbs}</div>
+      </div>`;
+  }
+  $app.innerHTML = html;
+  $app.querySelector(".scroller")?.appendChild(spreadNode());
+  if (variant === "C" && G.mode === "read") $app.querySelector(".thumb.on")?.scrollIntoView({ block: "nearest", inline: "center" });
+
+  // help overlay
+  if (G.help) $app.appendChild(el(`<div class="help" data-act-bg="help"><div class="card">
+    <h2 class="serif">Keys & questions under test</h2>
+    <table>
+      <tr><td><kbd>←</kbd> or <kbd>Space</kbd></td><td>advance (RTL: forward is leftward)</td></tr>
+      <tr><td><kbd>→</kbd></td><td>go back</td></tr>
+      <tr><td><kbd>f</kbd></td><td>cycle fit: height / width / 1:1</td></tr>
+      <tr><td><kbd>p</kbd></td><td>shift pairing by one (cover solo vs 1+2)</td></tr>
+      <tr><td><kbd>[</kbd> <kbd>]</kbd></td><td>switch prototype variant</td></tr>
+    </table>
+    <p>Left click-zone also advances; right zone goes back; centre toggles overlay (variant A).
+       Page 23 of Chapter 40 is a pre-joined wide spread — check all fit modes on it.
+       Chapter 40f is "latest", so its end shows the caught-up state.</p>
+    <button class="gold" data-act="help">Close</button></div></div>`));
+
+  // switcher pill
+  const name = VARIANTS.find(v => v[0] === variant)[1];
+  $app.appendChild(el(`<div class="proto" role="toolbar" aria-label="prototype variant">
+    <button data-cyc="-1" aria-label="previous variant">‹</button>
+    <span class="lbl">${variant} — ${name}</span>
+    <button data-cyc="1" aria-label="next variant">›</button>
+    <span class="hint">[ ] keys · ? help</span></div>`));
+}
+
+/* ---------------- events ---------------- */
+document.addEventListener("click", e => {
+  const t = e.target.closest("[data-act],[data-cyc],[data-fit],[data-jump],[data-act-bg]");
+  if (!t) return;
+  if (t.dataset.cyc) return cycleVariant(+t.dataset.cyc);
+  if (t.dataset.fit) { G.fit = t.dataset.fit; return render(); }
+  if (t.dataset.jump) {
+    const [ci, si] = t.dataset.jump.split(":").map(Number);
+    if (ci !== G.ci) { G.ci = ci; toast("▶ " + chapter().title); }
+    G.si = si; G.mode = "read"; return render();
+  }
+  const act = t.dataset.act || (t.dataset.actBg && e.target === t ? t.dataset.actBg : null);
+  if (act === "advance") advance();
+  else if (act === "back") back();
+  else if (act === "fit") cycleFit();
+  else if (act === "shift") toggleShift();
+  else if (act === "ovl") { G.ovl = !G.ovl; render(); }
+  else if (act === "help") { G.help = !G.help; render(); }
+  else if (act === "prevch") gotoChapter(chapter().prev, "jump");
+  else if (act === "nextch") gotoChapter(chapter().next, "jump");
+});
+document.addEventListener("keydown", e => {
+  if (e.target.matches("input,textarea,[contenteditable]")) return;
+  if (e.key === "ArrowLeft" || e.key === " ") { e.preventDefault(); advance(); }
+  else if (e.key === "ArrowRight") { e.preventDefault(); back(); }
+  else if (e.key === "f") cycleFit();
+  else if (e.key === "p") toggleShift();
+  else if (e.key === "[") cycleVariant(-1);
+  else if (e.key === "]") cycleVariant(1);
+  else if (e.key === "?") { G.help = !G.help; render(); }
+  else if (e.key === "Escape" && G.help) { G.help = false; render(); }
+});
+render();
+</script>
