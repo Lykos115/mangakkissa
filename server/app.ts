@@ -2,6 +2,7 @@ import express from 'express';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { friendlyDetail } from './errors.js';
+import { normalizeChapterUrl, resolveAdjacentChapterUrls, type ResolvedChapterNavigation } from './chapter-navigation.js';
 import { genericExtractor } from './extractors/generic.js';
 import { ExtractorRegistry } from './extractors/registry.js';
 import { ImagePipeline, type PageFetchFailure } from './image-pipeline.js';
@@ -24,17 +25,17 @@ export function createApp({ store, fetcher = fetch, clientDir, imageCacheMaxByte
     seriesTitle: string;
     chapterTitle: string;
   }
+  interface ResolvedChapter {
+    chapter: ChapterExtraction;
+    navigation: ResolvedChapterNavigation;
+  }
   interface ChapterFailure { httpStatus: number; body: ExtractError }
   const extractionCache = new Map<string, Promise<ChapterExtraction>>();
   const extractionWindows = new Map<string, Set<string>>();
   const chapterPageUrls = new Map<string, string[]>();
 
-  const parseChapterUrl = (value: unknown): URL | undefined => {
-    try {
-      const url = new URL(typeof value === 'string' ? value : '');
-      return ['http:', 'https:'].includes(url.protocol) ? url : undefined;
-    } catch { return undefined; }
-  };
+  const parseChapterUrl = (value: unknown): URL | undefined =>
+    normalizeChapterUrl(typeof value === 'string' ? value : '');
 
   const extractChapter = (chapterUrl: URL): Promise<ChapterExtraction> => {
     const cached = extractionCache.get(chapterUrl.href);
@@ -75,6 +76,21 @@ export function createApp({ store, fetcher = fetch, clientDir, imageCacheMaxByte
     return pending;
   };
 
+  const navigationSource = (chapter: ChapterExtraction) => ({
+    url: chapter.url,
+    chapterTitle: chapter.chapterTitle,
+    nextUrl: chapter.extracted.nextUrl,
+    prevUrl: chapter.extracted.prevUrl
+  });
+  const resolveChapter = async (chapter: ChapterExtraction, skipLettered: boolean): Promise<ResolvedChapter> => ({
+    chapter,
+    navigation: await resolveAdjacentChapterUrls(
+      navigationSource(chapter),
+      async (url) => navigationSource(await extractChapter(url)),
+      skipLettered
+    )
+  });
+
   const retainedExtractionUrls = () => new Set([...extractionWindows.values()].flatMap((window) => [...window]));
   const evictExtractions = (chapterUrls: string[]) => {
     const evictedPages: string[] = [];
@@ -88,12 +104,13 @@ export function createApp({ store, fetcher = fetch, clientDir, imageCacheMaxByte
       if (!pagesStillRetained.has(pageUrl)) pageHeaders.delete(pageUrl);
     }
   };
-  const evictUnretainedExtraction = (chapterUrl: string) => {
-    if (!retainedExtractionUrls().has(chapterUrl)) evictExtractions([chapterUrl]);
+  const evictUnretainedExtractions = () => {
+    const retained = retainedExtractionUrls();
+    evictExtractions([...extractionCache.keys()].filter((chapterUrl) => !retained.has(chapterUrl)));
   };
-  const retainExtractionWindow = (chapter: ChapterExtraction) => {
+  const retainExtractionWindow = ({ chapter, navigation }: ResolvedChapter) => {
     const retained = new Set<string>([chapter.url]);
-    for (const adjacent of [chapter.extracted.prevUrl, chapter.extracted.nextUrl]) {
+    for (const adjacent of [navigation.prevUrl, navigation.nextUrl]) {
       const parsed = parseChapterUrl(adjacent);
       if (parsed) retained.add(parsed.href);
     }
@@ -102,12 +119,12 @@ export function createApp({ store, fetcher = fetch, clientDir, imageCacheMaxByte
     evictExtractions([...extractionCache.keys()].filter((cachedUrl) => !retainedByAnySeries.has(cachedUrl)));
   };
 
-  const chapterPayload = (chapter: ChapterExtraction) => ({
+  const chapterPayload = ({ chapter, navigation }: ResolvedChapter) => ({
     url: chapter.url,
     title: chapter.chapterTitle,
     pages: chapter.extracted.pages,
-    ...(chapter.extracted.nextUrl ? { nextUrl: chapter.extracted.nextUrl } : {}),
-    ...(chapter.extracted.prevUrl ? { prevUrl: chapter.extracted.prevUrl } : {})
+    ...(navigation.nextUrl ? { nextUrl: navigation.nextUrl } : {}),
+    ...(navigation.prevUrl ? { prevUrl: navigation.prevUrl } : {})
   });
 
   const sendChapterFailure = (response: express.Response, error: unknown) => {
@@ -159,23 +176,26 @@ export function createApp({ store, fetcher = fetch, clientDir, imageCacheMaxByte
       response.status(400).json({ error: 'FETCH_FAILED', detail: 'A valid HTTP or HTTPS Chapter URL is required.' });
       return;
     }
+    const skipLettered = request.body?.skipLettered === true;
     try {
       const chapter = await extractChapter(chapterUrl);
+      const resolved = await resolveChapter(chapter, skipLettered);
       const recorded = await store.recordOpen(
         { key: chapter.seriesKey, title: chapter.seriesTitle },
         { url: chapter.url, title: chapter.chapterTitle, pageCount: chapter.extracted.pages.length }
       );
-      retainExtractionWindow(chapter);
+      retainExtractionWindow(resolved);
       response.json({
-        chapter: chapterPayload(chapter),
+        chapter: chapterPayload(resolved),
         series: { key: recorded.series.key, title: recorded.series.title, resumeChapterUrl: recorded.series.resumeChapterUrl },
         reread: recorded.reread
       });
-      if (chapter.extracted.nextUrl) {
-        const nextUrl = parseChapterUrl(chapter.extracted.nextUrl);
+      if (resolved.navigation.nextUrl) {
+        const nextUrl = parseChapterUrl(resolved.navigation.nextUrl);
         if (nextUrl) void extractChapter(nextUrl).catch(() => undefined);
       }
     } catch (error) {
+      evictUnretainedExtractions();
       const failure = error as Partial<ChapterFailure>;
       if (failure.httpStatus) sendChapterFailure(response, error);
       else response.status(500).json({ error: 'FETCH_FAILED', detail: `Library update failed: ${friendlyDetail(error)}` });
@@ -188,11 +208,14 @@ export function createApp({ store, fetcher = fetch, clientDir, imageCacheMaxByte
       response.status(400).json({ error: 'FETCH_FAILED', detail: 'A valid HTTP or HTTPS Chapter URL is required.' });
       return;
     }
+    const skipLettered = request.query.skipLettered === '1';
+    const retainAsCurrent = request.query.current === '1';
     try {
       const chapter = await extractChapter(chapterUrl);
+      const resolved = await resolveChapter(chapter, skipLettered);
       const existing = store.findSeries(chapter.seriesKey);
       response.json({
-        chapter: chapterPayload(chapter),
+        chapter: chapterPayload(resolved),
         series: {
           key: chapter.seriesKey,
           title: existing?.title ?? chapter.seriesTitle,
@@ -200,8 +223,10 @@ export function createApp({ store, fetcher = fetch, clientDir, imageCacheMaxByte
         },
         reread: existing?.chapters.some((entry) => entry.url === chapter.url) ?? false
       });
-      evictUnretainedExtraction(chapter.url);
+      if (retainAsCurrent) retainExtractionWindow(resolved);
+      else evictUnretainedExtractions();
     } catch (error) {
+      evictUnretainedExtractions();
       sendChapterFailure(response, error);
     }
   });

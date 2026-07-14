@@ -21,6 +21,9 @@ const html = `<html><head><meta property="og:site_name" content="Ink House"></he
   <img src="/001.jpg" width="800" height="1200"><img src="/002.jpg" width="800" height="1200"><img src="/003.jpg" width="1600" height="1200"></main></body></html>`;
 const chapterHtml = (number: number, adjacent = '') => `<html><head><meta property="og:site_name" content="Ink House"></head><body><main><h1>Chapter ${number}</h1>
   <img src="/${number}-001.jpg" width="800" height="1200"><img src="/${number}-002.jpg" width="800" height="1200"><img src="/${number}-003.jpg" width="800" height="1200">${adjacent}</main></body></html>`;
+const designatedChapterHtml = (designation: string, adjacent = '') => `<html><head><meta property="og:site_name" content="Ink House"></head><body><main><h1>Chapter ${designation}</h1>
+  <img src="/${designation}-001.jpg" width="800" height="1200"><img src="/${designation}-002.jpg" width="800" height="1200"><img src="/${designation}-003.jpg" width="800" height="1200">${adjacent}</main></body></html>`;
+const adjacentLinks = (previous?: string, next?: string) => `${previous ? `<a href="/chapter-${previous}">Previous Chapter</a>` : ''}${next ? `<a href="/chapter-${next}">Next Chapter</a>` : ''}`;
 
 describe('Chapter API', () => {
   it('opens a complete Chapter, persists it, and applies the Re-read rule', async () => {
@@ -71,6 +74,98 @@ describe('Chapter API', () => {
     expect(fetcher).toHaveBeenLastCalledWith('https://reader.test/1-001.jpg', expect.objectContaining({ headers: expect.objectContaining({ Referer: 'https://reader.test/chapter-1' }) }));
     await request(app).get('/api/image').query({ url: 'https://reader.test/2-001.jpg' }).expect(200);
     expect(fetcher).toHaveBeenLastCalledWith('https://reader.test/2-001.jpg', expect.objectContaining({ headers: expect.objectContaining({ Referer: 'https://reader.test/chapter-2' }) }));
+  });
+
+  it('skips lettered intermediaries in both directions without recording them and prefetches the effective next Chapter', async () => {
+    const pages = new Map<string, string>([
+      ['41', designatedChapterHtml('41', adjacentLinks(undefined, '41I'))],
+      ['41I', designatedChapterHtml('41I', adjacentLinks('41', '42'))],
+      ['42', designatedChapterHtml('42', adjacentLinks('41I', '42e'))],
+      ['42e', designatedChapterHtml('42e', adjacentLinks('42', '42f'))],
+      ['42f', designatedChapterHtml('42f', adjacentLinks('42e', '43'))],
+      ['43', designatedChapterHtml('43', adjacentLinks('42f'))]
+    ]);
+    const fetcher = vi.fn(async (url: string) => {
+      const designation = url.match(/chapter-([^/?#]+)/)?.[1];
+      const body = designation ? pages.get(designation) : undefined;
+      if (!body) throw new Error(`Unexpected fetch: ${url}`);
+      return new Response(body, { status: 200 });
+    });
+    const { app, store } = await harness(fetcher);
+
+    const defaultOpen = await request(app).post('/api/chapter/open').send({ url: 'https://reader.test/chapter-42' }).expect(200);
+    expect(defaultOpen.body.chapter).toMatchObject({
+      nextUrl: 'https://reader.test/chapter-42e',
+      prevUrl: 'https://reader.test/chapter-41I'
+    });
+
+    const refreshed = await request(app).get('/api/chapter/peek').query({
+      url: 'https://reader.test/chapter-42', skipLettered: 1, current: 1
+    }).expect(200);
+    expect(refreshed.body.chapter).toMatchObject({
+      nextUrl: 'https://reader.test/chapter-43',
+      prevUrl: 'https://reader.test/chapter-41'
+    });
+    expect(store.snapshot().series[0].chapters.map((entry) => entry.url)).toEqual(['https://reader.test/chapter-42']);
+
+    const beforeLetteredPeek = fetcher.mock.calls.filter(([url]) => url === 'https://reader.test/chapter-42e').length;
+    await request(app).get('/api/chapter/peek').query({ url: 'https://reader.test/chapter-42e' }).expect(200);
+    expect(fetcher.mock.calls.filter(([url]) => url === 'https://reader.test/chapter-42e')).toHaveLength(beforeLetteredPeek + 1);
+    expect(store.snapshot().series[0].chapters.map((entry) => entry.url)).toEqual(['https://reader.test/chapter-42']);
+
+    const nextPreview = await request(app).get('/api/chapter/peek').query({ url: refreshed.body.chapter.nextUrl, skipLettered: 1 }).expect(200);
+    expect(nextPreview.body.chapter).toMatchObject({ url: 'https://reader.test/chapter-43', prevUrl: 'https://reader.test/chapter-42' });
+    const openedNext = await request(app).post('/api/chapter/open').send({ url: 'https://reader.test/chapter-43', skipLettered: true }).expect(200);
+    expect(openedNext.body.chapter.prevUrl).toBe('https://reader.test/chapter-42');
+    expect(store.snapshot().series[0].chapters.map((entry) => entry.url)).toEqual([
+      'https://reader.test/chapter-42',
+      'https://reader.test/chapter-43'
+    ]);
+  });
+
+  it('opens a directly requested lettered Chapter while filtering only its outgoing adjacency', async () => {
+    const fetcher = vi.fn(async (url: string) => {
+      if (url === 'https://reader.test/chapter-42e') return new Response(designatedChapterHtml('42e', adjacentLinks('42', '42f')), { status: 200 });
+      if (url === 'https://reader.test/chapter-42f') return new Response(designatedChapterHtml('42f', adjacentLinks('42e', '43')), { status: 200 });
+      if (url === 'https://reader.test/chapter-43') return new Response(designatedChapterHtml('43', adjacentLinks('42f')), { status: 200 });
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+    const { app, store } = await harness(fetcher);
+
+    const first = await request(app).post('/api/chapter/open').send({
+      url: 'https://reader.test/chapter-42e', skipLettered: true
+    }).expect(200);
+    expect(first.body).toMatchObject({
+      chapter: { url: 'https://reader.test/chapter-42e', nextUrl: 'https://reader.test/chapter-43', prevUrl: 'https://reader.test/chapter-42' },
+      reread: false
+    });
+    expect(store.snapshot().series[0].chapters.map((entry) => entry.url)).toEqual(['https://reader.test/chapter-42e']);
+    expect((await request(app).post('/api/chapter/open').send({
+      url: 'https://reader.test/chapter-42e', skipLettered: true
+    }).expect(200)).body.reread).toBe(true);
+    expect(store.snapshot().series[0].chapters).toHaveLength(1);
+  });
+
+  it('retries a failed lettered intermediary without Library side effects from the failed resolution', async () => {
+    let intermediaryAttempts = 0;
+    const fetcher = vi.fn(async (url: string) => {
+      if (url === 'https://reader.test/chapter-42') return new Response(designatedChapterHtml('42', adjacentLinks(undefined, '42e')), { status: 200 });
+      if (url === 'https://reader.test/chapter-42e') {
+        intermediaryAttempts += 1;
+        if (intermediaryAttempts === 1) return new Response('temporary', { status: 503 });
+        return new Response(designatedChapterHtml('42e', adjacentLinks('42', '43')), { status: 200 });
+      }
+      if (url === 'https://reader.test/chapter-43') return new Response(designatedChapterHtml('43', adjacentLinks('42e')), { status: 200 });
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+    const { app, store } = await harness(fetcher);
+
+    await request(app).post('/api/chapter/open').send({ url: 'https://reader.test/chapter-42', skipLettered: true }).expect(502);
+    expect(store.snapshot()).toEqual({ series: [] });
+    const retried = await request(app).post('/api/chapter/open').send({ url: 'https://reader.test/chapter-42', skipLettered: true }).expect(200);
+    expect(retried.body.chapter.nextUrl).toBe('https://reader.test/chapter-43');
+    expect(intermediaryAttempts).toBe(2);
+    expect(store.snapshot().series[0].chapters.map((entry) => entry.url)).toEqual(['https://reader.test/chapter-42']);
   });
 
   it('does not retain arbitrary peek-only extraction outside a Series movement window', async () => {

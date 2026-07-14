@@ -1,9 +1,25 @@
 import { describe, expect, it, vi } from 'vitest';
+import { compareChapterDesignations, parseChapterDesignation } from '../server/chapter-designation.js';
 import { genericExtractor } from '../server/extractors/generic.js';
 import { ExtractorRegistry } from '../server/extractors/registry.js';
 import type { Extractor } from '../server/types.js';
 
 const page = (n: number, attrs = '') => `<img ${attrs} data-src="/pages/chapter-1-${String(n).padStart(3, '0')}.jpg" width="800" height="1200">`;
+
+describe('Chapter designation', () => {
+  it('parses final number-plus-letter designations with normalized suffixes and source precedence', () => {
+    expect(parseChapterDesignation('/series/chapter-42e/')).toEqual({ number: 42, suffix: 'e' });
+    expect(parseChapterDesignation('Chapter 41I')).toEqual({ number: 41, suffix: 'i' });
+    expect(parseChapterDesignation('Chapter 42')).toEqual({ number: 42, suffix: '' });
+    expect(parseChapterDesignation('/series-2/chapter-42f/', 'Chapter 99')).toEqual({ number: 42, suffix: 'f' });
+    expect(parseChapterDesignation('volume-2-chapter-17-extra-19A')).toEqual({ number: 19, suffix: 'a' });
+  });
+
+  it('orders unsuffixed Chapters before lettered variants', () => {
+    expect(compareChapterDesignations({ number: 42, suffix: '' }, { number: 42, suffix: 'e' })).toBeLessThan(0);
+    expect(compareChapterDesignations({ number: 42, suffix: 'f' }, { number: 43, suffix: '' })).toBeLessThan(0);
+  });
+});
 
 describe('Generic Extractor', () => {
   it('extracts the dominant scoped run in DOM order, lazy URLs, titles, and a doubled-width Page', () => {

@@ -25,6 +25,8 @@ export interface LibrarySeries {
 
 export interface Library { series: LibrarySeries[] }
 export interface OpenError extends Error { code?: string; status?: number; detail?: string }
+export interface ChapterNavigationOptions { skipLettered?: boolean }
+export interface ChapterPeekOptions extends ChapterNavigationOptions { retainAsCurrent?: boolean }
 
 async function responseError(response: Response): Promise<OpenError> {
   const body = await response.json().catch(() => ({}));
@@ -51,12 +53,18 @@ const jsonRequest = (method: string, body: unknown): RequestInit => ({
   body: JSON.stringify(body)
 });
 
-export async function openChapter(url: string): Promise<OpenPayload> {
-  return requestJson('/api/chapter/open', jsonRequest('POST', { url }));
+export async function openChapter(url: string, options: ChapterNavigationOptions = {}): Promise<OpenPayload> {
+  return requestJson('/api/chapter/open', jsonRequest('POST', {
+    url,
+    ...(options.skipLettered ? { skipLettered: true } : {})
+  }));
 }
 
-export async function peekChapter(url: string): Promise<OpenPayload> {
-  return requestJson(`/api/chapter/peek?url=${encodeURIComponent(url)}`);
+export async function peekChapter(url: string, options: ChapterPeekOptions = {}): Promise<OpenPayload> {
+  const query = new URLSearchParams({ url });
+  if (options.skipLettered) query.set('skipLettered', '1');
+  if (options.retainAsCurrent) query.set('current', '1');
+  return requestJson(`/api/chapter/peek?${query}`);
 }
 
 export async function completeChapter(url: string): Promise<void> {
