@@ -1,5 +1,6 @@
 import * as cheerio from 'cheerio';
 import type { Element } from 'domhandler';
+import { compareChapterDesignations, parseChapterDesignation, type ChapterDesignation } from '../chapter-designation.js';
 import type { ExtractError, Extractor, ExtractResult, Page } from '../types.js';
 
 const WIDTH_TOLERANCE = 0.15;
@@ -51,24 +52,8 @@ function titleSuffix(title: string | undefined) {
   return parts.length > 1 ? parts.at(-1) : undefined;
 }
 
-interface ChapterDesignation { number: number; suffix: string }
-
-function designation(...sources: Array<string | undefined>): ChapterDesignation | undefined {
-  for (const source of sources) {
-    if (!source) continue;
-    const matches = [...source.matchAll(/(\d+)([a-z]*)/gi)];
-    const match = matches.at(-1);
-    if (match) return { number: Number.parseInt(match[1], 10), suffix: match[2].toLowerCase() };
-  }
-  return undefined;
-}
-
-function compareDesignation(left: ChapterDesignation, right: ChapterDesignation) {
-  return left.number - right.number || left.suffix.localeCompare(right.suffix);
-}
-
 function adjacentChapterUrls($: cheerio.CheerioAPI, chapterUrl: string, chapterTitle: string | undefined) {
-  const current = designation(new URL(chapterUrl).pathname, chapterTitle);
+  const current = parseChapterDesignation(new URL(chapterUrl).pathname, chapterTitle);
   if (!current) return {};
 
   const candidates = new Map<string, ChapterDesignation>();
@@ -82,7 +67,7 @@ function adjacentChapterUrls($: cheerio.CheerioAPI, chapterUrl: string, chapterT
     if (!href) return;
     try {
       const resolved = new URL(href, chapterUrl);
-      const parsed = designation(resolved.pathname, anchor.attr('title'), text);
+      const parsed = parseChapterDesignation(resolved.pathname, anchor.attr('title'), text);
       if (parsed && resolved.href !== chapterUrl) candidates.set(resolved.href, parsed);
     } catch { /* malformed adjacent URL is not a candidate */ }
   });
@@ -90,9 +75,9 @@ function adjacentChapterUrls($: cheerio.CheerioAPI, chapterUrl: string, chapterT
   let previous: [string, ChapterDesignation] | undefined;
   let next: [string, ChapterDesignation] | undefined;
   for (const candidate of candidates) {
-    const order = compareDesignation(candidate[1], current);
-    if (order < 0 && (!previous || compareDesignation(candidate[1], previous[1]) > 0)) previous = candidate;
-    if (order > 0 && (!next || compareDesignation(candidate[1], next[1]) < 0)) next = candidate;
+    const order = compareChapterDesignations(candidate[1], current);
+    if (order < 0 && (!previous || compareChapterDesignations(candidate[1], previous[1]) > 0)) previous = candidate;
+    if (order > 0 && (!next || compareChapterDesignations(candidate[1], next[1]) < 0)) next = candidate;
   }
   return { ...(previous ? { prevUrl: previous[0] } : {}), ...(next ? { nextUrl: next[0] } : {}) };
 }
