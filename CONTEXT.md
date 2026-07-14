@@ -14,11 +14,11 @@ _Avoid_: Scraper, parser, adapter
 The outcome of extracting one Chapter URL: ordered Pages, optional chapter/series titles, optional adjacent-chapter URLs, optional image-request headers.
 
 **Page**:
-One image in a chapter, in reading order, with optional intrinsic dimensions. A doubled-width Page is a pre-joined Spread.
+One image in a chapter, in reading order, with optional intrinsic dimensions. A landscape Page (wider than tall, typically doubled width) is a pre-joined Spread.
 _Avoid_: Image, scan
 
 **Spread**:
-What the reader displays at once: two Pages side by side read right-to-left, or one doubled-width Page.
+What the reader displays at once: two Pages side by side read right-to-left, or one pre-joined landscape Page.
 _Avoid_: View, screen
 
 ### Library
