@@ -11,10 +11,11 @@ import {
   type OpenError,
   type OpenPayload
 } from './api.js';
-import { buildSpreads, pagesInReadingOrder, spreadPages, type ReaderPage } from './spreads.js';
+import { buildSpreads, deficientSpreadPages, pagesInReadingOrder, spreadPages, type ReaderPage } from './spreads.js';
 import './styles.css';
 
 const proxyUrl = (url: string) => `/api/image?url=${encodeURIComponent(url)}`;
+const upscaleUrl = (url: string) => `${proxyUrl(url)}&upscale=2`;
 const friendlyError = (code?: string, status?: number) => {
   if (code === 'FETCH_FAILED') return `Couldn't reach the site${status ? ` (HTTP ${status})` : ''}.`;
   if (code === 'LONG_STRIP_UNSUPPORTED') return 'This looks like a vertical-scroll comic — this reader only does page spreads.';
@@ -50,15 +51,17 @@ function ErrorMessage({ error, retry }: { error: OpenError; retry?: () => void }
 interface PageLoadState { generation: number; failed: boolean; recovering: boolean }
 interface PageSize { width: number; height: number }
 
-function PageMedia({ page, pageNumber, state, thumbnail = false, loading, onError, onLoad, onRetry }: {
+function PageMedia({ page, pageNumber, state, thumbnail = false, loading, upscaledSrc, onError, onLoad, onRetry, onUpscaledError }: {
   page: ReaderPage;
   pageNumber: number;
   state?: PageLoadState;
   thumbnail?: boolean;
   loading?: 'eager' | 'lazy';
+  upscaledSrc?: string;
   onError: (url: string, generation: number) => void;
   onLoad: (url: string, generation: number, size: PageSize) => void;
   onRetry: (url: string) => void;
+  onUpscaledError?: (url: string) => void;
 }) {
   const generation = state?.generation ?? 0;
   const recovering = state?.recovering === true;
@@ -68,10 +71,11 @@ function PageMedia({ page, pageNumber, state, thumbnail = false, loading, onErro
       <strong>Page {pageNumber} didn’t load</strong><span>Tap to retry</span>
     </button>;
   }
-  const src = `${proxyUrl(page.url)}${generation ? `&retry=${generation}` : ''}`;
+  const upscaled = !thumbnail && upscaledSrc !== undefined;
+  const src = upscaled ? upscaledSrc : `${proxyUrl(page.url)}${generation ? `&retry=${generation}` : ''}`;
   return <span className={thumbnail ? 'thumbnail-page' : 'page-media'}>
     <img src={src} alt={thumbnail ? '' : `Page ${pageNumber}`} loading={loading ?? (thumbnail ? 'lazy' : 'eager')}
-      onError={() => onError(page.url, generation)}
+      onError={() => upscaled ? onUpscaledError?.(page.url) : onError(page.url, generation)}
       onLoad={(event) => onLoad(page.url, generation, { width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight })} />
     {thumbnail && recovering && <span className="broken-marker" role="img" aria-label={`Page ${pageNumber} failed to load`}>!</span>}
   </span>;
@@ -106,6 +110,8 @@ export function App({
   const [continuationError, setContinuationError] = useState<OpenError>();
   const [pageLoads, setPageLoads] = useState<Record<string, PageLoadState>>({});
   const [measuredSizes, setMeasuredSizes] = useState<Record<string, PageSize>>({});
+  const [upscales, setUpscales] = useState<Record<string, 'ready' | 'failed'>>({});
+  const [upscalerBroken, setUpscalerBroken] = useState(false);
   const [transitionPending, setTransitionPending] = useState(false);
   const [skipLetteredChapters, setSkipLetteredChapters] = useState(false);
   const [navigationRefreshPending, setNavigationRefreshPending] = useState(false);
@@ -123,6 +129,11 @@ export function App({
   const spreads = useMemo(() => opened ? buildSpreads(chapterPages, coverSolo) : [], [opened, chapterPages, coverSolo]);
   const nextSpreads = useMemo(() => nextChapter ? buildSpreads(withMeasuredSizes(nextChapter.pages), coverSolo) : [], [nextChapter, measuredSizes, coverSolo]);
   const widePages = useMemo(() => spreadPages(chapterPages), [chapterPages]);
+  // Fires on learning deficiency: unconfigured means no upscale request is ever issued.
+  const pendingUpscales = useMemo(() => opened?.upscaler !== 'ready' ? [] : [
+    ...deficientSpreadPages(chapterPages),
+    ...deficientSpreadPages(nextChapter ? withMeasuredSizes(nextChapter.pages) : [])
+  ].filter((page) => !upscales[page.url]), [opened?.upscaler, chapterPages, nextChapter, measuredSizes, upscales]);
   const pageNumbers = useMemo(() => new Map(opened?.chapter.pages.map((page, index) => [page.url, index + 1]) ?? []), [opened]);
   const nextPageNumbers = useMemo(() => new Map(nextChapter?.pages.map((page, index) => [page.url, index + 1]) ?? []), [nextChapter]);
   const activeSpreadIndex = Math.min(spreadIndex, Math.max(spreads.length - 1, 0));
@@ -261,6 +272,11 @@ export function App({
     const current = loads[pageUrl] ?? { generation: 1, failed: true, recovering: false };
     return { ...loads, [pageUrl]: { generation: current.generation + 1, failed: false, recovering: true } };
   });
+  const upscaleLoaded = (pageUrl: string) => setUpscales((entries) => ({ ...entries, [pageUrl]: 'ready' }));
+  const upscaleFailed = (pageUrl: string) => {
+    setUpscales((entries) => ({ ...entries, [pageUrl]: 'failed' }));
+    setUpscalerBroken(true);
+  };
 
   useEffect(() => {
     const nextUrl = opened?.chapter.nextUrl;
@@ -428,6 +444,7 @@ export function App({
         <div className="reader-title"><strong>{opened.series.title}</strong><span aria-hidden="true"> — </span><h1>{opened.chapter.title}</h1></div>
         <span className="spread-count">{atEnd ? 'End of Chapter' : `Spread ${activeSpreadIndex + 1} / ${spreads.length}`}</span>
         <div className="reader-controls">
+          {upscalerBroken && <span className="upscale-error" role="alert">Spread upscaling isn’t working — originals are shown.</span>}
           <button className="quiet-button" onClick={cycleFit}>{fitOptions.find((option) => option.mode === fit)?.label} <kbd>f</kbd></button>
           <button className="quiet-button" aria-pressed={!coverSolo} onClick={togglePairing}>Shift pairing <kbd>p</kbd></button>
           <div className="navigation-option">
@@ -465,10 +482,14 @@ export function App({
           </section> : <section className={`spread ${spread.length === 1 ? 'solo' : ''} ${doubledWidth ? 'doubled-width' : ''}`} data-testid="spread" aria-label={`Spread ${activeSpreadIndex + 1}`}>
             {pagesInReadingOrder(spread).map((page) => {
               const pageNumber = pageNumbers.get(page.url) ?? 0;
-              return <PageMedia key={page.url} page={page} pageNumber={pageNumber} state={pageLoads[page.url]} onError={pageError} onLoad={pageLoaded} onRetry={retryPage} />;
+              return <PageMedia key={page.url} page={page} pageNumber={pageNumber} state={pageLoads[page.url]}
+                upscaledSrc={upscales[page.url] === 'ready' ? upscaleUrl(page.url) : undefined}
+                onError={pageError} onLoad={pageLoaded} onRetry={retryPage} onUpscaledError={upscaleFailed} />;
             })}
           </section>}
         </div>
+        {pendingUpscales.map((page) => <img key={page.url} className="upscale-loader" hidden alt="" src={upscaleUrl(page.url)}
+          onLoad={() => upscaleLoaded(page.url)} onError={() => upscaleFailed(page.url)} />)}
         <button className="click-zone next-zone" disabled={transitionPending || navigationRefreshPending || atEnd} onClick={advance} onPointerUp={releasePointerFocus} aria-label="Next spread" />
         <button className="click-zone center-zone" onClick={() => setChromeVisible((value) => !value)} onPointerUp={releasePointerFocus} aria-label="Toggle controls" />
         <button className="click-zone previous-zone" disabled={transitionPending || navigationRefreshPending || (!atEnd && activeSpreadIndex === 0 && !opened.chapter.prevUrl)} onClick={back} onPointerUp={releasePointerFocus} aria-label="Previous spread" />

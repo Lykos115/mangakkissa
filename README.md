@@ -60,6 +60,18 @@ To restrict the app to this computer again, set `HOST=127.0.0.1`:
 HOST=127.0.0.1 npm start
 ```
 
+## Optional Spread upscaling
+
+Some Chapters ship pre-joined landscape Spreads at half the width of their neighbouring Pages, which the browser can only render blurry. If you install [waifu2x-ncnn-vulkan](https://github.com/nihui/waifu2x-ncnn-vulkan) (a standalone binary — not an npm dependency), point the reader at it:
+
+```sh
+UPSCALER_BIN=/path/to/waifu2x-ncnn-vulkan npm start
+```
+
+Deficient Spreads then render immediately as-is and swap to a sharpened 2x version once the binary finishes (a few CPU seconds, off the reading path).
+
+On a machine without a GPU, use the **20220728** release with `-g -1` CPU mode (the 20250915 release segfaults in CPU mode), and install a Vulkan driver so the binary can start — on Debian/Ubuntu: `sudo apt-get install mesa-vulkan-drivers`. Upscaled bytes are cached in memory for the life of the process; nothing is written next to `library.json`. With `UPSCALER_BIN` unset, no upscale code path runs and the app behaves exactly as described above.
+
 The app has no authentication. Anyone who can reach the LAN URL can read and modify its Library, so only run it on a trusted local network. The Library is persisted in `library.json` at the project root. Stop the process with `Ctrl-C`; restarting it reloads the same Library.
 
 ## Reproducible release check

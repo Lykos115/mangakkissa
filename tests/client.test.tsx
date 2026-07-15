@@ -468,6 +468,78 @@ describe('Page failure handling', () => {
   });
 });
 
+describe('Spread upscaling', () => {
+  const deficientUrl = 'https://cdn.test/4.jpg';
+  const upscalePayload = {
+    ...payload,
+    upscaler: 'ready' as const,
+    chapter: { ...payload.chapter, pages: [
+      { url: 'https://cdn.test/1.jpg', width: 800, height: 1200 },
+      { url: 'https://cdn.test/2.jpg', width: 800, height: 1200 },
+      { url: 'https://cdn.test/3.jpg', width: 800, height: 1200 },
+      { url: deficientUrl, width: 800, height: 574 },
+      { url: 'https://cdn.test/5.jpg', width: 1600, height: 1200 }
+    ] }
+  };
+  const loaders = () => [...document.querySelectorAll('.upscale-loader')] as HTMLImageElement[];
+
+  it('never issues an upscale request when the server reports the upscaler unconfigured', async () => {
+    await submitChapter(async () => ({ ...upscalePayload, upscaler: 'unconfigured' as const }));
+    await screen.findByRole('heading', { name: 'Chapter 1' });
+    await userEvent.click(screen.getByRole('button', { name: 'Spread 3' }));
+    expect(document.querySelector('img[src*="upscale=2"]')).toBeNull();
+    expect(loaders()).toEqual([]);
+  });
+
+  it('requests upscales for deficient Spreads only and swaps the sharpened image in on load', async () => {
+    await submitChapter(async () => upscalePayload);
+    await screen.findByRole('heading', { name: 'Chapter 1' });
+    expect(loaders().map((image) => image.getAttribute('src'))).toEqual([
+      `/api/image?url=${encodeURIComponent(deficientUrl)}&upscale=2`
+    ]);
+
+    await userEvent.click(screen.getByRole('button', { name: 'Spread 3' }));
+    const original = within(screen.getByTestId('spread')).getByRole('img', { name: 'Page 4' });
+    expect(original.getAttribute('src')).not.toContain('upscale');
+
+    fireEvent.load(loaders()[0]);
+    const swapped = within(screen.getByTestId('spread')).getByRole('img', { name: 'Page 4' });
+    expect(swapped.getAttribute('src')).toContain('upscale=2');
+    expect(loaders()).toEqual([]);
+    const thumbnails = screen.getByRole('navigation', { name: 'Chapter Spreads' }).querySelectorAll('img');
+    expect([...thumbnails].every((image) => !image.getAttribute('src')?.includes('upscale'))).toBe(true);
+  });
+
+  it('fires the upscale when deficiency arrives by measurement', async () => {
+    const unmeasured = { ...upscalePayload, chapter: { ...upscalePayload.chapter, pages: upscalePayload.chapter.pages.map((page) => page.url === deficientUrl ? { url: deficientUrl } : page) } };
+    await submitChapter(async () => unmeasured);
+    await screen.findByRole('heading', { name: 'Chapter 1' });
+    expect(loaders()).toEqual([]);
+
+    await userEvent.click(screen.getByRole('button', { name: 'Spread 3' }));
+    const image = within(screen.getByTestId('spread')).getByRole('img', { name: 'Page 4' });
+    Object.defineProperty(image, 'naturalWidth', { value: 800 });
+    Object.defineProperty(image, 'naturalHeight', { value: 574 });
+    fireEvent.load(image);
+    expect(loaders().map((element) => element.getAttribute('src'))).toEqual([
+      `/api/image?url=${encodeURIComponent(deficientUrl)}&upscale=2`
+    ]);
+  });
+
+  it('keeps the original and warns once in the chrome when the upscaler breaks', async () => {
+    await submitChapter(async () => upscalePayload);
+    await screen.findByRole('heading', { name: 'Chapter 1' });
+    fireEvent.error(loaders()[0]);
+
+    expect(screen.getByRole('alert')).toHaveTextContent('Spread upscaling isn’t working — originals are shown.');
+    expect(loaders()).toEqual([]);
+    await userEvent.click(screen.getByRole('button', { name: 'Spread 3' }));
+    const original = within(screen.getByTestId('spread')).getByRole('img', { name: 'Page 4' });
+    expect(original.getAttribute('src')).toBe(`/api/image?url=${encodeURIComponent(deficientUrl)}`);
+    expect(screen.queryByRole('button', { name: /didn't load/ })).not.toBeInTheDocument();
+  });
+});
+
 describe('Reader controls', () => {
   it('navigates in RTL reading direction with keys and click zones', async () => {
     await openReader();

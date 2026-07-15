@@ -4,6 +4,7 @@ export interface OpenPayload {
   chapter: { url: string; title: string; pages: ReaderPage[]; nextUrl?: string; prevUrl?: string };
   series: { key: string; title: string; resumeChapterUrl: string };
   reread: boolean;
+  upscaler?: 'ready' | 'unconfigured';
 }
 
 export interface VisitedChapter {

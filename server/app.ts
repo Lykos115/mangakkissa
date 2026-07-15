@@ -8,13 +8,14 @@ import { ExtractorRegistry } from './extractors/registry.js';
 import { ImagePipeline, type PageFetchFailure } from './image-pipeline.js';
 import type { LibraryStore } from './storage/library-store.js';
 import type { ExtractError, ExtractResult } from './types.js';
+import type { Upscaler } from './upscaler.js';
 
 export type Fetcher = (url: string, init?: RequestInit) => Promise<Response>;
-interface AppOptions { store: LibraryStore; fetcher?: Fetcher; clientDir: string; imageCacheMaxBytes?: number }
+interface AppOptions { store: LibraryStore; fetcher?: Fetcher; clientDir: string; imageCacheMaxBytes?: number; upscaler?: Upscaler }
 
 const registry = new ExtractorRegistry([genericExtractor]);
 
-export function createApp({ store, fetcher = fetch, clientDir, imageCacheMaxBytes }: AppOptions) {
+export function createApp({ store, fetcher = fetch, clientDir, imageCacheMaxBytes, upscaler }: AppOptions) {
   const app = express();
   const imagePipeline = new ImagePipeline(fetcher, imageCacheMaxBytes);
   const pageHeaders = new Map<string, { referer?: string; userAgent?: string }>();
@@ -119,6 +120,7 @@ export function createApp({ store, fetcher = fetch, clientDir, imageCacheMaxByte
     evictExtractions([...extractionCache.keys()].filter((cachedUrl) => !retainedByAnySeries.has(cachedUrl)));
   };
 
+  const upscalerStatus: 'ready' | 'unconfigured' = upscaler ? 'ready' : 'unconfigured';
   const chapterPayload = ({ chapter, navigation }: ResolvedChapter) => ({
     url: chapter.url,
     title: chapter.chapterTitle,
@@ -188,7 +190,8 @@ export function createApp({ store, fetcher = fetch, clientDir, imageCacheMaxByte
       response.json({
         chapter: chapterPayload(resolved),
         series: { key: recorded.series.key, title: recorded.series.title, resumeChapterUrl: recorded.series.resumeChapterUrl },
-        reread: recorded.reread
+        reread: recorded.reread,
+        upscaler: upscalerStatus
       });
       if (resolved.navigation.nextUrl) {
         const nextUrl = parseChapterUrl(resolved.navigation.nextUrl);
@@ -221,7 +224,8 @@ export function createApp({ store, fetcher = fetch, clientDir, imageCacheMaxByte
           title: existing?.title ?? chapter.seriesTitle,
           resumeChapterUrl: existing?.resumeChapterUrl ?? chapter.url
         },
-        reread: existing?.chapters.some((entry) => entry.url === chapter.url) ?? false
+        reread: existing?.chapters.some((entry) => entry.url === chapter.url) ?? false,
+        upscaler: upscalerStatus
       });
       if (retainAsCurrent) retainExtractionWindow(resolved);
       else evictUnretainedExtractions();
@@ -261,6 +265,26 @@ export function createApp({ store, fetcher = fetch, clientDir, imageCacheMaxByte
     const headers: Record<string, string> = { Accept: 'image/*' };
     if (policy.referer) headers.Referer = policy.referer;
     if (policy.userAgent) headers['User-Agent'] = policy.userAgent;
+    if (request.query.upscale !== undefined) {
+      if (request.query.upscale !== '2') {
+        response.status(400).json({ error: 'UPSCALE_FAILED', detail: 'Only upscale=2 is supported.' });
+        return;
+      }
+      if (!upscaler) {
+        response.status(404).json({ error: 'UPSCALER_UNCONFIGURED', detail: 'No upscaler binary is configured.' });
+        return;
+      }
+      try {
+        const upscaled = await upscaler.upscale(source, () => imagePipeline.get(source, headers));
+        response.set('Content-Type', upscaled.contentType);
+        response.set('Cache-Control', 'max-age=86400, immutable');
+        response.send(upscaled.body);
+      } catch (error) {
+        const failure = error as PageFetchFailure;
+        response.status(502).json({ error: 'UPSCALE_FAILED', detail: failure.detail ?? `Upscale failed: ${friendlyDetail(error)}` });
+      }
+      return;
+    }
     try {
       const page = await imagePipeline.get(source, headers, request.query.retry !== undefined);
       response.set('Content-Type', page.contentType);

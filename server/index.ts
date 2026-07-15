@@ -6,6 +6,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createApp } from './app.js';
 import { LibraryStore } from './storage/library-store.js';
+import { Upscaler } from './upscaler.js';
 
 const sourcePath = fileURLToPath(import.meta.url);
 const here = dirname(sourcePath);
@@ -15,17 +16,21 @@ interface StartOptions {
   root?: string;
   port?: number;
   host?: string;
+  upscalerBinary?: string;
 }
 
 export async function startServer({
   root = defaultRoot,
   port = Number(process.env.PORT ?? 4173),
-  host = process.env.HOST ?? '0.0.0.0'
+  host = process.env.HOST ?? '0.0.0.0',
+  upscalerBinary = process.env.UPSCALER_BIN
 }: StartOptions = {}): Promise<Server> {
   const clientDir = join(root, 'dist/client');
   if (!existsSync(join(clientDir, 'index.html'))) throw new Error('Built client not found. Run npm run build before npm start.');
   const store = await LibraryStore.open(join(root, 'library.json'));
-  const app = createApp({ store, clientDir });
+  const upscaler = upscalerBinary ? new Upscaler(upscalerBinary) : undefined;
+  const app = createApp({ store, clientDir, upscaler });
+  if (upscalerBinary) console.log(`Spread upscaler:    ${upscalerBinary}`);
   const server = app.listen(port, host);
   await once(server, 'listening');
   const address = server.address();

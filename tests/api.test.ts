@@ -1,15 +1,16 @@
 import request from 'supertest';
-import { mkdtemp } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { createApp } from '../server/app.js';
 import { LibraryStore } from '../server/storage/library-store.js';
+import { Upscaler, type UpscaleRunner } from '../server/upscaler.js';
 
 async function harness(
   fetcher = vi.fn(),
   now: () => Date = () => new Date('2026-07-13T10:00:00.000Z'),
-  options: { imageCacheMaxBytes?: number } = {}
+  options: { imageCacheMaxBytes?: number; upscaler?: Upscaler } = {}
 ) {
   const dir = await mkdtemp(join(tmpdir(), 'reader-api-'));
   const path = join(dir, 'library.json');
@@ -301,6 +302,78 @@ describe('Chapter API', () => {
     expect(fetcher.mock.calls.filter(([url]) => url === 'https://reader.test/chapter-2')).toHaveLength(1);
     await request(app).post('/api/chapter/open').send({ url: 'https://reader.test/chapter-1' }).expect(200);
     expect(fetcher.mock.calls.filter(([url]) => url === 'https://reader.test/chapter-1')).toHaveLength(2);
+  });
+});
+
+describe('Spread upscaling API', () => {
+  const imageFetcher = () => vi.fn(async (url: string) => url.endsWith('.jpg')
+    ? new Response(new Uint8Array([1, 2, 3]), { status: 200, headers: { 'content-type': 'image/jpeg' } })
+    : new Response(html, { status: 200 }));
+  const upscaleTempDir = async () => join(await mkdtemp(join(tmpdir(), 'reader-upscale-')), 'upscales');
+
+  it('declares the upscaler capability on Chapter open and peek', async () => {
+    const absent = await harness(imageFetcher());
+    expect((await request(absent.app).post('/api/chapter/open').send({ url: 'https://reader.test/chapter-1' }).expect(200)).body.upscaler).toBe('unconfigured');
+    expect((await request(absent.app).get('/api/chapter/peek').query({ url: 'https://reader.test/chapter-1' }).expect(200)).body.upscaler).toBe('unconfigured');
+
+    const upscaler = new Upscaler('/opt/waifu2x-ncnn-vulkan', { tempDir: await upscaleTempDir(), run: async () => undefined });
+    const configured = await harness(imageFetcher(), undefined, { upscaler });
+    expect((await request(configured.app).post('/api/chapter/open').send({ url: 'https://reader.test/chapter-1' }).expect(200)).body.upscaler).toBe('ready');
+  });
+
+  it('returns an error status instead of original bytes when no upscaler is configured', async () => {
+    const { app } = await harness(imageFetcher());
+    await request(app).post('/api/chapter/open').send({ url: 'https://reader.test/chapter-1' }).expect(200);
+    const response = await request(app).get('/api/image').query({ url: 'https://reader.test/001.jpg', upscale: 2 }).expect(404);
+    expect(response.body).toMatchObject({ error: 'UPSCALER_UNCONFIGURED' });
+  });
+
+  it('upscales through the binary with source headers, caches the artifact, and cleans its temp files', async () => {
+    const run = vi.fn<UpscaleRunner>(async (_binary, _inputPath, outputPath) => { await writeFile(outputPath, Buffer.from([9, 9])); });
+    const tempDir = await upscaleTempDir();
+    const fetcher = imageFetcher();
+    const { app } = await harness(fetcher, undefined, { upscaler: new Upscaler('/opt/waifu2x-ncnn-vulkan', { tempDir, run }) });
+    await request(app).post('/api/chapter/open').send({ url: 'https://reader.test/chapter-1' }).expect(200);
+
+    const first = await request(app).get('/api/image').query({ url: 'https://reader.test/001.jpg', upscale: 2 }).expect(200);
+    expect(first.headers['content-type']).toMatch('image/webp');
+    expect(first.headers['cache-control']).toBe('max-age=86400, immutable');
+    expect([...first.body]).toEqual([9, 9]);
+    expect(run).toHaveBeenCalledWith('/opt/waifu2x-ncnn-vulkan', expect.stringContaining(tempDir), expect.stringContaining(tempDir));
+    expect(fetcher).toHaveBeenLastCalledWith('https://reader.test/001.jpg', expect.objectContaining({ headers: expect.objectContaining({ Referer: 'https://reader.test/chapter-1' }) }));
+    expect(await readdir(tempDir)).toEqual([]);
+
+    expect([...(await request(app).get('/api/image').query({ url: 'https://reader.test/001.jpg', upscale: 2 }).expect(200)).body]).toEqual([9, 9]);
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(fetcher.mock.calls.filter(([url]) => url === 'https://reader.test/001.jpg')).toHaveLength(1);
+  });
+
+  it('reports a failed upscale as an error, logs the reason, cleans up, and allows a later retry', async () => {
+    const run = vi.fn<UpscaleRunner>()
+      .mockRejectedValueOnce(new Error('bad model dir'))
+      .mockImplementationOnce(async (_binary, _inputPath, outputPath) => { await writeFile(outputPath, Buffer.from([7])); });
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const tempDir = await upscaleTempDir();
+    const { app } = await harness(imageFetcher(), undefined, { upscaler: new Upscaler('/opt/waifu2x-ncnn-vulkan', { tempDir, run }) });
+    await request(app).post('/api/chapter/open').send({ url: 'https://reader.test/chapter-1' }).expect(200);
+
+    const failed = await request(app).get('/api/image').query({ url: 'https://reader.test/001.jpg', upscale: 2 }).expect(502);
+    expect(failed.body).toMatchObject({ error: 'UPSCALE_FAILED' });
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('bad model dir'));
+    expect(await readdir(tempDir)).toEqual([]);
+
+    expect([...(await request(app).get('/api/image').query({ url: 'https://reader.test/001.jpg', upscale: 2 }).expect(200)).body]).toEqual([7]);
+  });
+
+  it('sweeps orphaned temp files from a previous process at startup', async () => {
+    const tempDir = await upscaleTempDir();
+    await mkdir(tempDir, { recursive: true });
+    await writeFile(join(tempDir, 'orphan-in'), Buffer.from([0]));
+    const run = vi.fn<UpscaleRunner>(async (_binary, _inputPath, outputPath) => { await writeFile(outputPath, Buffer.from([9])); });
+    const { app } = await harness(imageFetcher(), undefined, { upscaler: new Upscaler('/opt/waifu2x-ncnn-vulkan', { tempDir, run }) });
+    await request(app).post('/api/chapter/open').send({ url: 'https://reader.test/chapter-1' }).expect(200);
+    await request(app).get('/api/image').query({ url: 'https://reader.test/001.jpg', upscale: 2 }).expect(200);
+    expect(await readdir(tempDir)).toEqual([]);
   });
 });
 

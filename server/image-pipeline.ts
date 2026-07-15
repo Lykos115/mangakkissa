@@ -14,7 +14,7 @@ export interface PageFetchFailure {
   detail: string;
 }
 
-class ByteLru {
+export class ByteLru {
   private readonly entries = new Map<string, PageResource>();
   private bytes = 0;
 

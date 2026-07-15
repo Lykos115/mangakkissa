@@ -13,6 +13,14 @@ export function spreadPages(pages: ReaderPage[]) {
   return new Set(pages.filter((page) => isLandscape(page) || Boolean(base && page.width && Math.abs(page.width - base * 2) / (base * 2) <= 0.15)));
 }
 
+// Deficient Spreads only: landscape but short of the doubled width its neighbours set.
+// Not isLandscape alone — that matches sharp Spreads too, which is right for layout and wrong for upscaling.
+export function deficientSpreadPages(pages: ReaderPage[]) {
+  const base = baseWidth(pages);
+  if (!base) return new Set<ReaderPage>();
+  return new Set(pages.filter((page) => isLandscape(page) && page.width! < base * 2 * 0.85));
+}
+
 export function pagesInReadingOrder(pages: ReaderPage[]) {
   return [...pages].reverse();
 }

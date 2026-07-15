@@ -82,6 +82,7 @@ input { min-width: 0; flex: 1; border: 1px solid #55514a; border-radius: .5rem; 
 .navigation-refresh-status { color: var(--muted); font-size: .72rem; text-align: center; }
 .navigation-refresh-error { position: absolute; z-index: 20; top: calc(100% + .4rem); right: 0; width: max-content; max-width: min(22rem, 80vw); display: flex; align-items: center; gap: .5rem; padding: .5rem; border: 1px solid #8d4541; border-radius: .4rem; background: #2a1718; color: #f0b4af; box-shadow: 0 .75rem 2rem #000a; font-size: .78rem; }
 .navigation-refresh-error .quiet-button { flex: none; padding: .35rem .55rem; }
+.upscale-error { display: flex; align-items: center; padding: .4rem .55rem; border: 1px solid #8d4541; border-radius: .4rem; background: #2a1718; color: #f0b4af; font-size: .78rem; white-space: nowrap; }
 .quiet-button { padding: .5rem .7rem; border: 1px solid var(--line); background: var(--surface-2); color: inherit; }
 .quiet-button:hover { border-color: #6a6254; }
 
