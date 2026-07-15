@@ -11,7 +11,7 @@ import {
   type OpenError,
   type OpenPayload
 } from './api.js';
-import { buildSpreads, doubledWidthPages, pagesInReadingOrder, type ReaderPage } from './spreads.js';
+import { buildSpreads, pagesInReadingOrder, spreadPages, type ReaderPage } from './spreads.js';
 import './styles.css';
 
 const proxyUrl = (url: string) => `/api/image?url=${encodeURIComponent(url)}`;
@@ -48,6 +48,7 @@ function ErrorMessage({ error, retry }: { error: OpenError; retry?: () => void }
 }
 
 interface PageLoadState { generation: number; failed: boolean; recovering: boolean }
+interface PageSize { width: number; height: number }
 
 function PageMedia({ page, pageNumber, state, thumbnail = false, loading, onError, onLoad, onRetry }: {
   page: ReaderPage;
@@ -56,7 +57,7 @@ function PageMedia({ page, pageNumber, state, thumbnail = false, loading, onErro
   thumbnail?: boolean;
   loading?: 'eager' | 'lazy';
   onError: (url: string, generation: number) => void;
-  onLoad: (url: string, generation: number) => void;
+  onLoad: (url: string, generation: number, size: PageSize) => void;
   onRetry: (url: string) => void;
 }) {
   const generation = state?.generation ?? 0;
@@ -70,7 +71,8 @@ function PageMedia({ page, pageNumber, state, thumbnail = false, loading, onErro
   const src = `${proxyUrl(page.url)}${generation ? `&retry=${generation}` : ''}`;
   return <span className={thumbnail ? 'thumbnail-page' : 'page-media'}>
     <img src={src} alt={thumbnail ? '' : `Page ${pageNumber}`} loading={loading ?? (thumbnail ? 'lazy' : 'eager')}
-      onError={() => onError(page.url, generation)} onLoad={() => onLoad(page.url, generation)} />
+      onError={() => onError(page.url, generation)}
+      onLoad={(event) => onLoad(page.url, generation, { width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight })} />
     {thumbnail && recovering && <span className="broken-marker" role="img" aria-label={`Page ${pageNumber} failed to load`}>!</span>}
   </span>;
 }
@@ -103,6 +105,7 @@ export function App({
   const [continuationPending, setContinuationPending] = useState(false);
   const [continuationError, setContinuationError] = useState<OpenError>();
   const [pageLoads, setPageLoads] = useState<Record<string, PageLoadState>>({});
+  const [measuredSizes, setMeasuredSizes] = useState<Record<string, PageSize>>({});
   const [transitionPending, setTransitionPending] = useState(false);
   const [skipLetteredChapters, setSkipLetteredChapters] = useState(false);
   const [navigationRefreshPending, setNavigationRefreshPending] = useState(false);
@@ -115,9 +118,11 @@ export function App({
   const [fit, setFit] = useState<FitMode>(defaultFit);
   const [chromeVisible, setChromeVisible] = useState(true);
   const currentThumbnail = useRef<HTMLButtonElement>(null);
-  const spreads = useMemo(() => opened ? buildSpreads(opened.chapter.pages, coverSolo) : [], [opened, coverSolo]);
-  const nextSpreads = useMemo(() => nextChapter ? buildSpreads(nextChapter.pages, coverSolo) : [], [nextChapter, coverSolo]);
-  const widePages = useMemo(() => doubledWidthPages(opened?.chapter.pages ?? []), [opened]);
+  const withMeasuredSizes = (pages: ReaderPage[]) => pages.map((page) => measuredSizes[page.url] ? { ...page, ...measuredSizes[page.url] } : page);
+  const chapterPages = useMemo(() => withMeasuredSizes(opened?.chapter.pages ?? []), [opened, measuredSizes]);
+  const spreads = useMemo(() => opened ? buildSpreads(chapterPages, coverSolo) : [], [opened, chapterPages, coverSolo]);
+  const nextSpreads = useMemo(() => nextChapter ? buildSpreads(withMeasuredSizes(nextChapter.pages), coverSolo) : [], [nextChapter, measuredSizes, coverSolo]);
+  const widePages = useMemo(() => spreadPages(chapterPages), [chapterPages]);
   const pageNumbers = useMemo(() => new Map(opened?.chapter.pages.map((page, index) => [page.url, index + 1]) ?? []), [opened]);
   const nextPageNumbers = useMemo(() => new Map(nextChapter?.pages.map((page, index) => [page.url, index + 1]) ?? []), [nextChapter]);
   const activeSpreadIndex = Math.min(spreadIndex, Math.max(spreads.length - 1, 0));
@@ -160,7 +165,7 @@ export function App({
       setContinuationUrl('');
       setContinuationError(undefined);
       setPageLoads({});
-      setSpreadIndex(target === 'last' ? Math.max(buildSpreads(payload.chapter.pages, coverSolo).length - 1, 0) : target);
+      setSpreadIndex(target === 'last' ? Math.max(buildSpreads(withMeasuredSizes(payload.chapter.pages), coverSolo).length - 1, 0) : target);
       setAnnounceChapterChange(announce);
     } catch (caught) {
       if (presentFailure) {
@@ -240,11 +245,18 @@ export function App({
     if (current.generation !== generation || (current.failed && !current.recovering)) return loads;
     return { ...loads, [pageUrl]: { ...current, failed: true, recovering: false } };
   });
-  const pageLoaded = (pageUrl: string, generation: number) => setPageLoads((loads) => {
-    const current = loads[pageUrl];
-    if (!current || current.generation !== generation || (!current.failed && !current.recovering)) return loads;
-    return { ...loads, [pageUrl]: { ...current, failed: false, recovering: false } };
-  });
+  const pageLoaded = (pageUrl: string, generation: number, size: PageSize) => {
+    if (size.width > 0 && size.height > 0) setMeasuredSizes((sizes) => {
+      const current = sizes[pageUrl];
+      if (current && current.width === size.width && current.height === size.height) return sizes;
+      return { ...sizes, [pageUrl]: size };
+    });
+    setPageLoads((loads) => {
+      const current = loads[pageUrl];
+      if (!current || current.generation !== generation || (!current.failed && !current.recovering)) return loads;
+      return { ...loads, [pageUrl]: { ...current, failed: false, recovering: false } };
+    });
+  };
   const retryPage = (pageUrl: string) => setPageLoads((loads) => {
     const current = loads[pageUrl] ?? { generation: 1, failed: true, recovering: false };
     return { ...loads, [pageUrl]: { generation: current.generation + 1, failed: false, recovering: true } };
@@ -294,6 +306,21 @@ export function App({
     document.addEventListener('keydown', onKeyDown);
     return () => document.removeEventListener('keydown', onKeyDown);
   }, [opened, spreads.length, activeSpreadIndex, transitionPending, navigationRefreshPending, atEnd, nextError, skipLetteredChapters]);
+
+  const spreadsRef = useRef<ReaderPage[][]>([]);
+  const coverSoloRef = useRef(coverSolo);
+  useEffect(() => {
+    const previous = spreadsRef.current;
+    const pairingShifted = coverSoloRef.current !== coverSolo;
+    spreadsRef.current = spreads;
+    coverSoloRef.current = coverSolo;
+    if (previous === spreads || pairingShifted || previous.length === 0 || spreads.length === 0) return;
+    setSpreadIndex((index) => {
+      const anchor = previous[Math.min(index, previous.length - 1)]?.[0]?.url;
+      const found = anchor === undefined ? -1 : spreads.findIndex((spread) => spread.some((page) => page.url === anchor));
+      return found === -1 ? Math.min(index, spreads.length - 1) : found;
+    });
+  }, [spreads, coverSolo]);
 
   useEffect(() => {
     setSpreadIndex((value) => Math.min(value, Math.max(spreads.length - 1, 0)));

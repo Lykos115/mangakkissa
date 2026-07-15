@@ -69,6 +69,22 @@ describe('Spread builder', () => {
     ]);
   });
 
+  it('keeps a landscape Page solo even when its width is not double the base width', () => {
+    const pages = [
+      { url: 'https://cdn.test/1.jpg', width: 844, height: 1200 },
+      { url: 'https://cdn.test/2.jpg', width: 844, height: 1200 },
+      { url: 'https://cdn.test/3.jpg', width: 1456, height: 1200 },
+      { url: 'https://cdn.test/4.jpg', width: 844, height: 1200 },
+      { url: 'https://cdn.test/5.jpg', width: 844, height: 1200 }
+    ];
+    expect(buildSpreads(pages).map((spread) => spread.map((page) => page.url))).toEqual([
+      ['https://cdn.test/1.jpg'],
+      ['https://cdn.test/2.jpg'],
+      ['https://cdn.test/3.jpg'],
+      ['https://cdn.test/4.jpg', 'https://cdn.test/5.jpg']
+    ]);
+  });
+
   it('shifts pairing by one Page without pairing across a doubled-width Page', () => {
     expect(buildSpreads(payload.chapter.pages, false).map((spread) => spread.map((page) => page.url))).toEqual([
       ['https://cdn.test/1.jpg', 'https://cdn.test/2.jpg'],
@@ -506,6 +522,29 @@ describe('Reader controls', () => {
     expect(within(screen.getByTestId('spread')).getAllByRole('img').map((image) => image.getAttribute('alt'))).toEqual(['Page 2', 'Page 1']);
     await userEvent.click(screen.getByRole('button', { name: 'Spread 3' }));
     expect(within(screen.getByTestId('spread')).getAllByRole('img').map((image) => image.getAttribute('alt'))).toEqual(['Page 4']);
+  });
+
+  it('splits a Page measured as landscape into its own Spread and stays on it', async () => {
+    const unmeasuredPayload = { ...payload, chapter: { ...payload.chapter, pages: [
+      { url: 'https://cdn.test/1.jpg', width: 800, height: 1200 },
+      { url: 'https://cdn.test/2.jpg', width: 800, height: 1200 },
+      { url: 'https://cdn.test/3.jpg', width: 800, height: 1200 },
+      { url: 'https://cdn.test/4.jpg' },
+      { url: 'https://cdn.test/5.jpg', width: 800, height: 1200 }
+    ] } };
+    await submitChapter(async () => unmeasuredPayload);
+    await screen.findByRole('heading', { name: 'Chapter 1' });
+    expect(screen.getByText('Spread 1 / 3')).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Spread 3' }));
+    const image = within(screen.getByTestId('spread')).getByRole('img', { name: 'Page 4' });
+    Object.defineProperty(image, 'naturalWidth', { value: 1500 });
+    Object.defineProperty(image, 'naturalHeight', { value: 1080 });
+    fireEvent.load(image);
+
+    expect(screen.getByText('Spread 3 / 4')).toBeInTheDocument();
+    expect(within(screen.getByTestId('spread')).getAllByRole('img').map((img) => img.getAttribute('alt'))).toEqual(['Page 4']);
+    expect(screen.getByTestId('spread')).toHaveClass('doubled-width');
   });
 
   it('jumps through the Spread filmstrip, tracks progress, and prioritizes the next two Spreads', async () => {
