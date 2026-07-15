@@ -37,9 +37,12 @@ The HTTP service this ticket assumed existed for one reason: the reader's VM is 
 
 The trigger living client-side means the *decision* re-evaluates on every mount and every device — a phone will independently ask for an upscale a desktop already requested. The server cache absorbs the *work* (second asker gets a hit), so only the decision duplicates, not the compute. Accepted as provisional ("for now"); moving the rule server-side would require parsing image headers in pure TypeScript and holding chapter-wide dimension state the server has no other reason to keep.
 
-### Left to [Decide reader behavior when the upscaler is absent, slow, or failing](007-decide-degradation-behavior.md)
+### Amended by [Decide reader behavior when the upscaler is absent, slow, or failing](007-decide-degradation-behavior.md)
 
-What `?upscale=2` returns when the binary is unset or the spawn fails. Returning the *original* would make the background `<img>` succeed and pointlessly swap identical bytes; an error status lets `onError` keep the original with no second fetch. That's 007's call, not this ticket's.
+Two additions, one of them correcting an omission in the contract above:
+
+1. **`?upscale=2` returns an error status on failure, never the original bytes.** Returning the original would make the background `<img>` fire `onLoad` and swap in bytes identical to what's already displayed, having downloaded them twice; an error status lets `onError` keep the original with no second fetch.
+2. **The Chapter-open response carries `upscaler: 'ready' | 'unconfigured'`** (`server/app.ts:188`). **The `<img>`-as-protocol design above is insufficient on its own**: `onError` fires identically for 404, 500, a dead socket, or garbage bytes and exposes neither status nor body, so the client cannot tell *unconfigured* (stay silent) from *broken* (warn). The capability flag restores that distinction without giving up the `<img>` — and when `unconfigured`, the client issues no request at all, which is a stronger form of "absent changes nothing" than this contract originally offered.
 
 ## Blocked by
 
