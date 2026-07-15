@@ -1,6 +1,6 @@
 import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
-import type { Library, LibrarySeries } from '../types.js';
+import type { Library, LibrarySeries } from '../../shared/contract.js';
 
 interface SeriesInput { key: string; title: string }
 interface ChapterInput { url: string; title: string; pageCount: number }

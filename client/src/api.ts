@@ -1,30 +1,7 @@
-import type { ReaderPage } from './spreads.js';
+import type { Library, LibrarySeries, OpenPayload } from '../../shared/contract.js';
 
-export interface OpenPayload {
-  chapter: { url: string; title: string; pages: ReaderPage[]; nextUrl?: string; prevUrl?: string };
-  series: { key: string; title: string; resumeChapterUrl: string };
-  reread: boolean;
-  upscaler?: 'ready' | 'unconfigured';
-}
+export type { Library, LibrarySeries, OpenPayload, VisitedChapter } from '../../shared/contract.js';
 
-export interface VisitedChapter {
-  url: string;
-  title: string;
-  pageCount: number;
-  firstOpenedAt: string;
-  completed: boolean;
-}
-
-export interface LibrarySeries {
-  key: string;
-  title: string;
-  resumeChapterUrl: string;
-  addedAt: string;
-  lastReadAt: string;
-  chapters: VisitedChapter[];
-}
-
-export interface Library { series: LibrarySeries[] }
 export interface OpenError extends Error { code?: string; status?: number; detail?: string }
 export interface ChapterNavigationOptions { skipLettered?: boolean }
 export interface ChapterPeekOptions extends ChapterNavigationOptions { retainAsCurrent?: boolean }

@@ -1,4 +1,5 @@
 import express from 'express';
+import type { OpenPayload } from '../shared/contract.js';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { friendlyDetail } from './errors.js';
@@ -24,7 +25,7 @@ export function createApp({ store, fetcher = fetch, clientDir, imageCacheMaxByte
     normalizeChapterUrl(typeof value === 'string' ? value : '');
 
   const upscalerStatus: 'ready' | 'unconfigured' = upscaler ? 'ready' : 'unconfigured';
-  const chapterPayload = ({ chapter, navigation }: ResolvedChapter) => ({
+  const chapterPayload = ({ chapter, navigation }: ResolvedChapter): OpenPayload['chapter'] => ({
     url: chapter.url,
     title: chapter.chapterTitle,
     pages: chapter.extracted.pages,
@@ -94,7 +95,7 @@ export function createApp({ store, fetcher = fetch, clientDir, imageCacheMaxByte
         series: { key: recorded.series.key, title: recorded.series.title, resumeChapterUrl: recorded.series.resumeChapterUrl },
         reread: recorded.reread,
         upscaler: upscalerStatus
-      });
+      } satisfies OpenPayload);
       extractions.prefetch(resolved.navigation.nextUrl);
     } catch (error) {
       extractions.evictUnretained();
@@ -124,7 +125,7 @@ export function createApp({ store, fetcher = fetch, clientDir, imageCacheMaxByte
         },
         reread: existing?.chapters.some((entry) => entry.url === chapter.url) ?? false,
         upscaler: upscalerStatus
-      });
+      } satisfies OpenPayload);
       if (retainAsCurrent) extractions.retainWindow(resolved);
       else extractions.evictUnretained();
     } catch (error) {
