@@ -1,4 +1,4 @@
-import type { Fetcher } from './app.js';
+import type { Fetcher } from './types.js';
 import { friendlyDetail } from './errors.js';
 
 export const DEFAULT_IMAGE_CACHE_MAX_BYTES = 200 * 1024 * 1024;

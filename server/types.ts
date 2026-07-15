@@ -1,3 +1,5 @@
+export type Fetcher = (url: string, init?: RequestInit) => Promise<Response>;
+
 export interface Page {
   url: string;
   width?: number;

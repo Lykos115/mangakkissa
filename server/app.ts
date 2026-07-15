@@ -7,10 +7,9 @@ import { genericExtractor } from './extractors/generic.js';
 import { ExtractorRegistry } from './extractors/registry.js';
 import { ImagePipeline, type PageFetchFailure } from './image-pipeline.js';
 import type { LibraryStore } from './storage/library-store.js';
-import type { ExtractError, ExtractResult } from './types.js';
+import type { ExtractError, ExtractResult, Fetcher } from './types.js';
 import type { Upscaler } from './upscaler.js';
 
-export type Fetcher = (url: string, init?: RequestInit) => Promise<Response>;
 interface AppOptions { store: LibraryStore; fetcher?: Fetcher; clientDir: string; imageCacheMaxBytes?: number; upscaler?: Upscaler }
 
 const registry = new ExtractorRegistry([genericExtractor]);
