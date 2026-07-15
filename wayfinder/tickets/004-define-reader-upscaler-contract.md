@@ -1,6 +1,6 @@
 # Define the reader ↔ upscaler contract
 
-`wayfinder:grilling` · HITL · parent: [map](../map.md)
+`wayfinder:grilling` · HITL · parent: [map](../map.md) · assignee: nemiru · status: closed
 
 ## Question
 
@@ -14,6 +14,32 @@ What crosses the wire, and where does the seam sit?
 - **Where does the reader call from** — the server (which has the bytes and a cache) or the client (which knows the stage size and therefore the real target)?
 
 Answer with the contract, concretely enough to implement against.
+
+## Resolution
+
+**There is no service. The upscaler is a subprocess the reader spawns.**
+
+The HTTP service this ticket assumed existed for one reason: the reader's VM is compute-dead and the GPUs lived on other boxes, so inference had to run *elsewhere*. [Choose the upscaler runtime and host GPU](002-choose-upscaler-runtime-and-gpu.md) removed that reason — no GPU is needed — and the service went with it. Nothing is left to justify a network boundary, a wire format, a second listening process, or a project to package: `waifu2x-ncnn-vulkan` is already a standalone portable binary maintained upstream.
+
+### The contract
+
+**The client decides, the server executes, the upscaler stays dumb.**
+
+1. **Trigger — client.** The client already measures `naturalWidth`/`naturalHeight` per image (`client/src/App.tsx:75`) and computes `baseWidth` chapter-wide (`client/src/spreads.ts:5`). It alone knows a Spread is landscape **and** `width < 2 × baseWidth`. The server cannot know this: it has no image library to read dimensions with (the no-native-deps promise), and `baseWidth` needs every Page's size, which the server only fetches lazily.
+2. **Request.** `GET /api/image?url=<source>&upscale=2` — one query param on the existing route (`server/app.ts:251`).
+3. **Execute — server.** Cache hit → return. Otherwise fetch the original through the existing `ImagePipeline` (which already holds the per-Page Referer/User-Agent policy), spawn `waifu2x-ncnn-vulkan -s 2 -g -1`, cache, return bytes.
+4. **The upscaler never learns what a Spread is.** It receives an image and a scale factor. Layout logic stays in the reader, where it already lives.
+5. **Delivery — the `<img>` tag is the async protocol.** Render the original immediately; load `?upscale=2` in a background image; swap on `onLoad`; keep the original on `onError`. No polling, no `202`, no status endpoint — the server simply takes its few seconds. `PageMedia` already has the `onLoad`/`onError` hooks (`client/src/App.tsx:73-75`), and the pipeline's `pending` map (`server/image-pipeline.ts:92`) dedupes concurrent requests for free.
+6. **Configuration.** One env var pointing at the binary. Unset → the code path never lights up → `npm ci && npm start` is byte-for-byte today's app.
+7. **Output format.** Emit WebP (`-f webp`) to match the sources and keep the cache small; PNG would be several times larger for the same B&W art. Revisit in [Decide cache location, key, and lifetime for upscaled Spreads](006-decide-cache-location-key-lifetime.md) if budget says otherwise.
+
+### Accepted trade-off
+
+The trigger living client-side means the *decision* re-evaluates on every mount and every device — a phone will independently ask for an upscale a desktop already requested. The server cache absorbs the *work* (second asker gets a hit), so only the decision duplicates, not the compute. Accepted as provisional ("for now"); moving the rule server-side would require parsing image headers in pure TypeScript and holding chapter-wide dimension state the server has no other reason to keep.
+
+### Left to [Decide reader behavior when the upscaler is absent, slow, or failing](007-decide-degradation-behavior.md)
+
+What `?upscale=2` returns when the binary is unset or the spawn fails. Returning the *original* would make the background `<img>` succeed and pointlessly swap identical bytes; an error status lets `onError` keep the original with no second fetch. That's 007's call, not this ticket's.
 
 ## Blocked by
 

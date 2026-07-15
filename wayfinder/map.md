@@ -4,7 +4,9 @@
 
 ## Destination
 
-A go/no-go decision, plus a plug contract, for a **standalone upscaling service** that brings blurry sub-2x Spreads to parity with the Spreads that already look sharp — such that the Manga Reader behaves **exactly as it does today** when the service is absent.
+A go/no-go decision, plus a plug contract, for an **optional local upscaler** that brings blurry sub-2x Spreads to parity with the Spreads that already look sharp — such that the Manga Reader behaves **exactly as it does today** when the upscaler is absent.
+
+> Originally worded as a *standalone upscaling service*. Retired by [Define the reader ↔ upscaler contract](tickets/004-define-reader-upscaler-contract.md): the service existed only to run inference where the GPUs were, and [Choose the upscaler runtime and host GPU](tickets/002-choose-upscaler-runtime-and-gpu.md) established that no GPU is needed. It collapsed to a **subprocess the reader spawns** — an upstream binary, not a project to build.
 
 ## Notes
 
@@ -16,7 +18,7 @@ A go/no-go decision, plus a plug contract, for a **standalone upscaling service*
 
 ### Established while charting (not decisions on the route — constraints the route runs inside)
 
-- **`main` stays plug-and-play.** The MVP's promise (README): no database, no browser automation, no native image libraries, no second server, four production dependencies. This is why the upscaler is a *separate project*, not a feature. The reader gains at most an optional client.
+- **`main` stays plug-and-play.** The MVP's promise (README): no database, no browser automation, no native image libraries, no second server, four production dependencies. The upscaler is an **upstream binary** (`waifu2x-ncnn-vulkan`) the reader optionally spawns — not a new dependency and not a project to build. One env var; unset means the code path never lights up and `npm ci && npm start` is byte-for-byte today's app.
 - **Progressive enhancement is settled.** The original Spread renders immediately; an upscaled one swaps in when ready; nothing ever blocks. This takes inference off the critical path and is what makes even slow hardware viable.
 - **Quality bar is parity, not perfection** — match the Spreads that already look fine. Confirmed achievable: waifu2x.net output on a real manga panel satisfied the reader. Manga here is B&W, so no chroma artifacts.
 - **waifu2x models are fixed-2x.** If a future corpus contains a fractional target, the candidate route is upscale 2x, then Lanczos-downscale; the measured corpus did not require that path.
@@ -40,20 +42,21 @@ The reader server is compute-dead and cannot see any GPU. This is the fact that 
 
 - [Measure the Spread ratio distribution in real Chapters](tickets/001-measure-spread-ratio-distribution.md) — The completed-Chapter sample is bimodal: three affected Spreads are 1× and need direct 2× upscaling, while four are already 2×; affected Spreads are 1.8% of rendered Spreads.
 - [Choose the upscaler runtime and host GPU](tickets/002-choose-upscaler-runtime-and-gpu.md) — No GPU needed: the workload is a handful of 800×~574 images, so throughput is a non-axis and all three GPUs are irrelevant. If upscaling happens, `waifu2x-ncnn-vulkan -g -1` (CPU, cunet, native 2×) — a single portable binary, no Python, no native deps.
+- [Decide the upscale trigger rule and prefetch policy](tickets/005-decide-trigger-rule-and-prefetch.md) — **Fire on learning deficiency.** The moment a Spread's dimensions resolve, request its upscale if it qualifies. Not prefetch: no depth, no queue, no scheduler — the filmstrip's existing eager window (`activeSpreadIndex..+2`) already measures ahead of the reader, so upscales finish before arrival. Dissolves filmstrip jumps (unready → original → swaps) and cancellation (speculative work warms the cache). **Rate-independent**, so 001's undercounted rate never bites.
+- [Define the reader ↔ upscaler contract](tickets/004-define-reader-upscaler-contract.md) — **There is no service.** It collapsed to a subprocess: the client decides (it alone knows `baseWidth`), the server executes (`GET /api/image?url=…&upscale=2` → spawn `waifu2x-ncnn-vulkan -s 2 -g -1` → cache → bytes), and the upscaler never learns what a Spread is. The `<img>` tag is the async protocol — render the original, load the upscale in the background, swap on `onLoad`, keep the original on `onError`. One env var; unset means the path never lights up.
 - [Confirm parity at real Spread ratios](tickets/003-confirm-parity-at-real-ratios.md) — **GO.** waifu2x output on real manga art satisfies the reader's bar; screentone moiré did not materialise as an objection. The Lanczos control is answered by the app's own current rendering — today's blurry Spread *is* a plain browser upscale, and it's the complaint that started this effort — so a dumb resize does not close the gap.
 - [Decide whether to fix this at the source instead of upscaling](tickets/008-decide-source-resolution-vs-upscaling.md) — **No.** The same host serves both doubled and undoubled Spreads (ch. 68/72 at 1600px, ch. 75 at 800×574); the blur is per-chapter scan quality, not per-host, so there is no better source to switch to. **Upscaling is warranted and the destination stands.** Also exposes a sampling bias in 001: it measured only *completed* Chapters, excluding the resume Chapter where the reader actually sees the problem — so its affected-Spread rate is a floor, not a count.
 
 ## Not yet specified
 
-- **How the reader learns where the service lives** — env var, config file, discovery. Hangs on the contract.
-- **Whether the service needs auth or hardening** on the tailnet. The reader has no auth today by design; a second listening process may change that calculus.
-- **Packaging and repo layout** — separate repo vs sibling directory; how the two are developed, versioned, and released against each other.
-- **Whether any of this ever lands on `main`**, and what it would cost the four-dependency story. Currently assumed: it does not.
-- **Whether the filmstrip or next-Chapter prefetch participate** at all. Thumbnails are 62px (`client/src/styles.css:128`) so probably not, but the boundary isn't drawn.
+- **Whether any of this ever lands on `main`**, and what it would cost the four-dependency story. Now cheaper than assumed while charting — the cost is one env var and an inert code path, not a dependency.
+<!-- Cleared by [Decide the upscale trigger rule and prefetch policy]: the filmstrip participates as the *measurement* source that drives the trigger (its eager window is the prefetch), but never as a *consumer* — 62px thumbnails are never upscaled. Next-Chapter Spreads fire uniformly under the same rule. -->
+
+<!-- Cleared by [Define the reader ↔ upscaler contract]: "how the reader learns where the service lives" (an env var pointing at the binary), "whether the service needs auth or hardening on the tailnet" (moot — no service, no listening port), and "packaging and repo layout" (moot — nothing to package; the upscaler is an upstream binary). -->
 
 ## Out of scope
 
-- **Browser-side WebGPU inference.** Ruled out in favour of a service: the off-the-shelf browser path is `onnxruntime-web`/WASM, which nunif's own README calls *"very slow, like 90's dial-up internet access"*, and a WebGPU port isn't a given. Returns only if the service seam proves wrong.
+- **Browser-side WebGPU inference.** Ruled out: the off-the-shelf browser path is `onnxruntime-web`/WASM, which nunif's own README calls *"very slow, like 90's dial-up internet access"*, and a WebGPU port isn't a given. Doubly moot now that inference runs as a local subprocess on CPU.
 - **HTTPS / `tailscale serve`.** Was a hard prerequisite *only* to expose `navigator.gpu` (WebGPU requires a secure context; the app is plain HTTP at `server/index.ts:29`). Moot once inference is server-side.
 - **Color and chroma handling.** The manga read here is B&W.
 - **Changing `main`'s reading behavior or dependency footprint.** The destination explicitly preserves it.

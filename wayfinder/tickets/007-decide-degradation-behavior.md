@@ -18,4 +18,4 @@ Note the asymmetry: a failed *Page* fetch is a hole in the Chapter and must be v
 
 ## Blocked by
 
-- [Define the reader ↔ upscaler contract](004-define-reader-upscaler-contract.md)
+- [Define the reader ↔ upscaler contract](004-define-reader-upscaler-contract.md) **(closed: subprocess, not a service)**
