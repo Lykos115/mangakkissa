@@ -3,13 +3,19 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "engines": { "node": ">=20.19" },
+  "engines": {
+    "node": ">=20.19"
+  },
+  "knip": {
+    "entry": ["client/src/main.tsx"]
+  },
   "scripts": {
     "dev": "tsx server/index.ts",
     "build": "vite build && tsc -p tsconfig.server.json",
     "start": "node dist/server/index.js",
     "test": "vitest run --root .",
-    "test:watch": "vitest --root ."
+    "test:watch": "vitest --root .",
+    "doctor": "npx react-doctor@latest"
   },
   "dependencies": {
     "cheerio": "1.2.0",
@@ -17,7 +23,9 @@
     "react": "19.2.7",
     "react-dom": "19.2.7"
   },
-  "overrides": { "esbuild": "0.28.1" },
+  "overrides": {
+    "esbuild": "0.28.1"
+  },
   "devDependencies": {
     "@testing-library/jest-dom": "6.9.1",
     "@testing-library/react": "16.3.2",

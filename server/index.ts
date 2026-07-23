@@ -37,9 +37,8 @@ export async function startServer({
   const boundPort = typeof address === 'object' && address ? address.port : port;
   console.log(`Manga Reader local: http://127.0.0.1:${boundPort}`);
   if (host === '0.0.0.0' || host === '::') {
-    const lanAddresses = Object.values(networkInterfaces()).flatMap((entries) => entries ?? [])
-      .filter((entry) => entry.family === 'IPv4' && !entry.internal)
-      .map((entry) => entry.address);
+    const lanAddresses = Object.values(networkInterfaces()).flatMap((entries) =>
+      (entries ?? []).flatMap((entry) => entry.family === 'IPv4' && !entry.internal ? [entry.address] : []));
     for (const lanAddress of [...new Set(lanAddresses)]) {
       console.log(`Manga Reader LAN:   http://${lanAddress}:${boundPort}`);
     }
