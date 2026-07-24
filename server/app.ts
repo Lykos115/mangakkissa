@@ -1,4 +1,5 @@
 import express from 'express';
+import { normalizeAppBasePath } from '../shared/app-base.js';
 import type { OpenPayload } from '../shared/contract.js';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
@@ -12,12 +13,13 @@ import type { LibraryStore } from './storage/library-store.js';
 import type { Fetcher } from './types.js';
 import type { Upscaler } from './upscaler.js';
 
-interface AppOptions { store: LibraryStore; fetcher?: Fetcher; clientDir: string; imageCacheMaxBytes?: number; upscaler?: Upscaler }
+interface AppOptions { store: LibraryStore; fetcher?: Fetcher; clientDir: string; imageCacheMaxBytes?: number; upscaler?: Upscaler; basePath?: string }
 
 const registry = new ExtractorRegistry([genericExtractor]);
 
-export function createApp({ store, fetcher = fetch, clientDir, imageCacheMaxBytes, upscaler }: AppOptions) {
+export function createApp({ store, fetcher = fetch, clientDir, imageCacheMaxBytes, upscaler, basePath = '/' }: AppOptions) {
   const app = express();
+  const router = express.Router();
   const imagePipeline = new ImagePipeline(fetcher, imageCacheMaxBytes);
   const extractions = new ExtractionCache(fetcher, registry);
 
@@ -39,13 +41,13 @@ export function createApp({ store, fetcher = fetch, clientDir, imageCacheMaxByte
   };
 
   app.disable('x-powered-by');
-  app.use(express.json({ limit: '32kb' }));
+  router.use(express.json({ limit: '32kb' }));
 
-  app.get('/api/library', (_request, response) => {
+  router.get('/api/library', (_request, response) => {
     response.json(store.library());
   });
 
-  app.patch('/api/series/:key', async (request, response) => {
+  router.patch('/api/series/:key', async (request, response) => {
     const title = typeof request.body?.title === 'string' ? request.body.title.trim() : '';
     if (!title) {
       response.status(400).json({ error: 'INVALID_TITLE', detail: 'A non-empty Series title is required.' });
@@ -63,7 +65,7 @@ export function createApp({ store, fetcher = fetch, clientDir, imageCacheMaxByte
     }
   });
 
-  app.delete('/api/series/:key', async (request, response) => {
+  router.delete('/api/series/:key', async (request, response) => {
     try {
       if (!await store.removeSeries(request.params.key)) {
         response.status(404).json({ error: 'SERIES_NOT_FOUND', detail: 'Series not found.' });
@@ -75,7 +77,7 @@ export function createApp({ store, fetcher = fetch, clientDir, imageCacheMaxByte
     }
   });
 
-  app.post('/api/chapter/open', async (request, response) => {
+  router.post('/api/chapter/open', async (request, response) => {
     const chapterUrl = parseChapterUrl(request.body?.url);
     if (!chapterUrl) {
       response.status(400).json({ error: 'FETCH_FAILED', detail: 'A valid HTTP or HTTPS Chapter URL is required.' });
@@ -104,7 +106,7 @@ export function createApp({ store, fetcher = fetch, clientDir, imageCacheMaxByte
     }
   });
 
-  app.get('/api/chapter/peek', async (request, response) => {
+  router.get('/api/chapter/peek', async (request, response) => {
     const chapterUrl = parseChapterUrl(request.query.url);
     if (!chapterUrl) {
       response.status(400).json({ error: 'FETCH_FAILED', detail: 'A valid HTTP or HTTPS Chapter URL is required.' });
@@ -134,7 +136,7 @@ export function createApp({ store, fetcher = fetch, clientDir, imageCacheMaxByte
     }
   });
 
-  app.post('/api/chapter/complete', async (request, response) => {
+  router.post('/api/chapter/complete', async (request, response) => {
     const chapterUrl = parseChapterUrl(request.body?.url);
     if (!chapterUrl) {
       response.status(400).json({ error: 'FETCH_FAILED', detail: 'A valid HTTP or HTTPS Chapter URL is required.' });
@@ -151,7 +153,7 @@ export function createApp({ store, fetcher = fetch, clientDir, imageCacheMaxByte
     }
   });
 
-  app.get('/api/image', async (request, response) => {
+  router.get('/api/image', async (request, response) => {
     let source: URL;
     try {
       source = new URL(String(request.query.url ?? ''));
@@ -200,11 +202,12 @@ export function createApp({ store, fetcher = fetch, clientDir, imageCacheMaxByte
   });
 
   if (existsSync(clientDir)) {
-    app.use(express.static(clientDir));
-    app.use((request, response, next) => {
-      if (request.method !== 'GET' || request.path.startsWith('/api/')) return next();
+    router.use(express.static(clientDir));
+    router.use((request, response, next) => {
+      if (request.method !== 'GET' || request.path === '/api' || request.path.startsWith('/api/')) return next();
       response.sendFile(join(clientDir, 'index.html'));
     });
   }
+  app.use(normalizeAppBasePath(basePath, '/'), router);
   return app;
 }

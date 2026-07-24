@@ -1,4 +1,5 @@
 import type { Library, LibrarySeries, OpenPayload } from '../../shared/contract.js';
+import { appUrl } from './app-url.js';
 
 export type { Library, LibrarySeries, OpenPayload, VisitedChapter } from '../../shared/contract.js';
 
@@ -32,7 +33,7 @@ const jsonRequest = (method: string, body: unknown): RequestInit => ({
 });
 
 export async function openChapter(url: string, options: ChapterNavigationOptions = {}): Promise<OpenPayload> {
-  return requestJson('/api/chapter/open', jsonRequest('POST', {
+  return requestJson(appUrl('api/chapter/open'), jsonRequest('POST', {
     url,
     ...(options.skipLettered ? { skipLettered: true } : {})
   }));
@@ -42,21 +43,21 @@ export async function peekChapter(url: string, options: ChapterPeekOptions = {})
   const query = new URLSearchParams({ url });
   if (options.skipLettered) query.set('skipLettered', '1');
   if (options.retainAsCurrent) query.set('current', '1');
-  return requestJson(`/api/chapter/peek?${query}`);
+  return requestJson(`${appUrl('api/chapter/peek')}?${query}`);
 }
 
 export async function completeChapter(url: string): Promise<void> {
-  await request('/api/chapter/complete', jsonRequest('POST', { url }));
+  await request(appUrl('api/chapter/complete'), jsonRequest('POST', { url }));
 }
 
 export async function getLibrary(): Promise<Library> {
-  return requestJson('/api/library');
+  return requestJson(appUrl('api/library'));
 }
 
 export async function renameSeries(key: string, title: string): Promise<LibrarySeries> {
-  return requestJson(`/api/series/${encodeURIComponent(key)}`, jsonRequest('PATCH', { title }));
+  return requestJson(appUrl(`api/series/${encodeURIComponent(key)}`), jsonRequest('PATCH', { title }));
 }
 
 export async function removeSeries(key: string): Promise<void> {
-  await request(`/api/series/${encodeURIComponent(key)}`, { method: 'DELETE' });
+  await request(appUrl(`api/series/${encodeURIComponent(key)}`), { method: 'DELETE' });
 }

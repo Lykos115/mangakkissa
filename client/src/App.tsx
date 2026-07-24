@@ -10,6 +10,7 @@ import {
   type OpenError,
   type OpenPayload
 } from './api.js';
+import { appUrl } from './app-url.js';
 import { buildSpreads, deficientSpreadPages, pagesInReadingOrder, spreadPages, type ReaderPage } from './spreads.js';
 import {
   fitOptions,
@@ -23,7 +24,7 @@ import {
 import { initialLibraryState, libraryReducer } from './library-state.js';
 import './styles.css';
 
-const proxyUrl = (url: string) => `/api/image?url=${encodeURIComponent(url)}`;
+const proxyUrl = (url: string) => `${appUrl('api/image')}?url=${encodeURIComponent(url)}`;
 const upscaleUrl = (url: string) => `${proxyUrl(url)}&upscale=2`;
 const friendlyError = (code?: string, status?: number) => {
   if (code === 'FETCH_FAILED') return `Couldn't reach the site${status ? ` (HTTP ${status})` : ''}.`;
