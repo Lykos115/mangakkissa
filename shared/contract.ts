@@ -12,6 +12,8 @@ export interface VisitedChapter {
 }
 export interface LibrarySeries {
   key: string; title: string; resumeChapterUrl: string; addedAt: string; lastReadAt: string; chapters: VisitedChapter[];
+  /** Raw source URL of the Page used as this Series' cover image; auto-set from the first opened Chapter until changed. */
+  coverPageUrl?: string;
 }
 export interface Library { series: LibrarySeries[] }
 

@@ -76,6 +76,22 @@ describe('Library storage', () => {
     expect((await LibraryStore.open(path)).snapshot()).toEqual({ series: [] });
   });
 
+  it('seeds the cover from the first opened Chapter, keeps it on later opens, and persists an explicit pick', async () => {
+    const { path, store } = await temporaryStore();
+    await store.recordOpen({ key: 'reader.test', title: 'Ink House' }, { ...chapter, firstPageUrl: 'https://cdn.test/p1.jpg' });
+    expect(store.snapshot().series[0].coverPageUrl).toBe('https://cdn.test/p1.jpg');
+    // The first Page URL is a store concern, not part of the Visited Log entry.
+    expect(store.snapshot().series[0].chapters[0]).not.toHaveProperty('firstPageUrl');
+
+    await store.recordOpen({ key: 'reader.test', title: 'Ink House' }, { ...chapter, url: 'https://reader.test/chapter-2', title: 'Chapter 2', firstPageUrl: 'https://cdn.test/p9.jpg' });
+    expect(store.snapshot().series[0].coverPageUrl).toBe('https://cdn.test/p1.jpg');
+
+    const covered = await store.setCover('reader.test', 'https://cdn.test/chosen.jpg');
+    expect(covered?.coverPageUrl).toBe('https://cdn.test/chosen.jpg');
+    expect((await LibraryStore.open(path)).snapshot().series[0].coverPageUrl).toBe('https://cdn.test/chosen.jpg');
+    expect(await store.setCover('missing.test', 'https://cdn.test/x.jpg')).toBeUndefined();
+  });
+
   it('uses a temporary file and does not commit memory when the atomic rename fails', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'reader-store-'));
     const path = join(dir, 'library.json');

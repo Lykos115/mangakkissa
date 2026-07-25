@@ -402,6 +402,28 @@ describe('Library API', () => {
     await request(app).patch('/api/series/reader.test').send({ title: '   ' }).expect(400);
   });
 
+  it('seeds the Series cover from the first Page of an opened Chapter', async () => {
+    const fetcher = vi.fn(async () => new Response(html, { status: 200, headers: { 'content-type': 'text/html' } }));
+    const { app } = await harness(fetcher);
+    await request(app).post('/api/chapter/open').send({ url: 'https://reader.test/chapter-1' }).expect(200);
+    const library = (await request(app).get('/api/library').expect(200)).body;
+    expect(library.series[0].coverPageUrl).toBe('https://reader.test/001.jpg');
+  });
+
+  it('updates a Series cover by Page URL and persists after restart', async () => {
+    const { app, store, path } = await harness();
+    await store.recordOpen({ key: 'reader.test', title: 'Ink House' }, { url: 'https://reader.test/c1', title: 'Chapter 1', pageCount: 3 });
+
+    const response = await request(app).patch('/api/series/reader.test').send({ coverUrl: 'https://cdn.test/cover.jpg' }).expect(200);
+    expect(response.body.coverPageUrl).toBe('https://cdn.test/cover.jpg');
+    expect(response.body.title).toBe('Ink House');
+    expect((await LibraryStore.open(path)).snapshot().series[0].coverPageUrl).toBe('https://cdn.test/cover.jpg');
+
+    await request(app).patch('/api/series/reader.test').send({ coverUrl: 'not-a-url' }).expect(400);
+    await request(app).patch('/api/series/reader.test').send({}).expect(400);
+    await request(app).patch('/api/series/missing.test').send({ coverUrl: 'https://cdn.test/cover.jpg' }).expect(404);
+  });
+
   it('removes a Series and its Visited Log and persists after restart', async () => {
     const { app, store, path } = await harness();
     await store.recordOpen({ key: 'reader.test', title: 'Ink House' }, { url: 'https://reader.test/c1', title: 'Chapter 1', pageCount: 3 });

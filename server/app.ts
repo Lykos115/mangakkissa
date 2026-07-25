@@ -48,17 +48,28 @@ export function createApp({ store, fetcher = fetch, clientDir, imageCacheMaxByte
   });
 
   router.patch('/api/series/:key', async (request, response) => {
-    const title = typeof request.body?.title === 'string' ? request.body.title.trim() : '';
-    if (!title) {
+    const title = typeof request.body?.title === 'string' ? request.body.title.trim() : undefined;
+    const coverUrl = request.body?.coverUrl === undefined ? undefined : parseChapterUrl(request.body.coverUrl);
+    if (title !== undefined && !title) {
       response.status(400).json({ error: 'INVALID_TITLE', detail: 'A non-empty Series title is required.' });
       return;
     }
+    if (request.body?.coverUrl !== undefined && !coverUrl) {
+      response.status(400).json({ error: 'INVALID_COVER_URL', detail: 'A valid HTTP or HTTPS Page URL is required.' });
+      return;
+    }
+    if (title === undefined && coverUrl === undefined) {
+      response.status(400).json({ error: 'NOTHING_TO_UPDATE', detail: 'Provide a title or coverUrl to update.' });
+      return;
+    }
     try {
-      const series = await store.renameSeries(request.params.key, title);
+      let series = await store.findSeries(request.params.key);
       if (!series) {
         response.status(404).json({ error: 'SERIES_NOT_FOUND', detail: 'Series not found.' });
         return;
       }
+      if (coverUrl !== undefined) series = await store.setCover(request.params.key, coverUrl.href) ?? series;
+      if (title !== undefined) series = await store.renameSeries(request.params.key, title) ?? series;
       response.json(series);
     } catch (error) {
       response.status(500).json({ error: 'FETCH_FAILED', detail: `Library update failed: ${friendlyDetail(error)}` });
@@ -89,7 +100,7 @@ export function createApp({ store, fetcher = fetch, clientDir, imageCacheMaxByte
       const { chapter } = resolved;
       const recorded = await store.recordOpen(
         { key: chapter.seriesKey, title: chapter.seriesTitle },
-        { url: chapter.url, title: chapter.chapterTitle, pageCount: chapter.extracted.pages.length }
+        { url: chapter.url, title: chapter.chapterTitle, pageCount: chapter.extracted.pages.length, firstPageUrl: chapter.extracted.pages[0]?.url }
       );
       extractions.retainWindow(resolved);
       response.json({
