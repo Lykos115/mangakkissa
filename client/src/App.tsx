@@ -6,11 +6,13 @@ import {
   peekChapter as defaultPeekChapter,
   removeSeries as defaultRemoveSeries,
   renameSeries as defaultRenameSeries,
-  type LibrarySeries,
+  setSeriesCover as defaultSetSeriesCover,
   type OpenError,
   type OpenPayload
 } from './api.js';
 import { appUrl } from './app-url.js';
+import { ErrorMessage } from './error-message.js';
+import { LibraryShelf } from './library-shelf.js';
 import { buildSpreads, deficientSpreadPages, pagesInReadingOrder, spreadPages, type ReaderPage } from './spreads.js';
 import {
   fitOptions,
@@ -21,16 +23,10 @@ import {
   type PageLoadState,
   type PageSize
 } from './reader-state.js';
-import { initialLibraryState, libraryReducer } from './library-state.js';
 import './styles.css';
 
 const proxyUrl = (url: string) => `${appUrl('api/image')}?url=${encodeURIComponent(url)}`;
 const upscaleUrl = (url: string) => `${proxyUrl(url)}&upscale=2`;
-const friendlyError = (code?: string, status?: number) => {
-  if (code === 'FETCH_FAILED') return `Couldn't reach the site${status ? ` (HTTP ${status})` : ''}.`;
-  if (code === 'LONG_STRIP_UNSUPPORTED') return 'This looks like a vertical-scroll comic — this reader only does page spreads.';
-  return "Couldn't find chapter pages on this page — this site may need its own extractor.";
-};
 
 const CHAPTER_TOAST_DURATION_MS = 1800;
 
@@ -46,14 +42,7 @@ interface AppProps {
   getLibrary?: typeof defaultGetLibrary;
   renameSeries?: typeof defaultRenameSeries;
   removeSeries?: typeof defaultRemoveSeries;
-}
-
-function ErrorMessage({ error, retry }: { error: OpenError; retry?: () => void }) {
-  return <div className="error" role="alert">
-    <strong>{friendlyError(error.code, error.status)}</strong>
-    <p>{error.code ?? 'UNKNOWN'} · HTTP {error.status ?? 'unknown'} · {error.detail ?? error.message}</p>
-    {retry && <button type="button" onClick={retry}>Retry</button>}
-  </div>;
+  setSeriesCover?: typeof defaultSetSeriesCover;
 }
 
 function PageMedia({ page, pageNumber, state, thumbnail = false, loading, upscaledSrc, onError, onLoad, onRetry, onUpscaledError }: {
@@ -229,134 +218,14 @@ function Filmstrip({ spreads, nextChapter, nextSpreads, activeSpreadIndex, atEnd
   </footer>;
 }
 
-function PasteCard({ openChapter, onOpened }: {
-  openChapter: typeof defaultOpenChapter;
-  onOpened: (payload: OpenPayload) => void;
-}) {
-  const [url, setUrl] = useState('');
-  const [pending, setPending] = useState(false);
-  const [error, setError] = useState<OpenError>();
-  const submit = async (event?: FormEvent) => {
-    event?.preventDefault();
-    setPending(true);
-    setError(undefined);
-    try {
-      onOpened(await openChapter(url));
-    } catch (caught) {
-      setError(caught as OpenError);
-    } finally {
-      setPending(false);
-    }
-  };
-  return <section className="paste-card">
-    <p className="eyebrow">Local manga reader</p><h1>Library</h1><p>Paste a Chapter URL to extract its Pages and read right to left.</p>
-    <form onSubmit={submit}><label htmlFor="chapter-url">Chapter URL</label><div className="paste-row"><input id="chapter-url" type="url" required value={url} onChange={(event) => setUrl(event.target.value)} placeholder="https://example.test/chapter-1/"/><button type="submit" disabled={pending}>{pending ? 'Opening…' : 'Open chapter'}</button></div></form>
-    {error && <ErrorMessage error={error} retry={() => { void submit(); }} />}
-  </section>;
-}
-
-function LibrarySection({ getLibrary, openChapter, renameSeries, removeSeries, onOpened }: {
-  getLibrary: typeof defaultGetLibrary;
-  openChapter: typeof defaultOpenChapter;
-  renameSeries: typeof defaultRenameSeries;
-  removeSeries: typeof defaultRemoveSeries;
-  onOpened: (payload: OpenPayload) => void;
-}) {
-  const [state, dispatch] = useReducer(libraryReducer, initialLibraryState);
-  const { library, loading, error, seriesPending, seriesErrors, expanded, editing, managementErrors } = state;
-
-  const refresh = useCallback(async () => {
-    try {
-      dispatch({ type: 'library-loaded', library: await getLibrary() });
-    } catch (caught) {
-      dispatch({ type: 'library-failed', error: caught as OpenError });
-    }
-  }, [getLibrary]);
-
-  useEffect(() => { void refresh(); }, [refresh]);
-
-  const openFromLibrary = async (key: string, chapterUrl: string) => {
-    dispatch({ type: 'series-open-started', key });
-    try {
-      onOpened(await openChapter(chapterUrl));
-    } catch (caught) {
-      dispatch({ type: 'series-open-failed', key, failure: { error: caught as OpenError, url: chapterUrl } });
-    } finally {
-      dispatch({ type: 'series-open-finished' });
-    }
-  };
-
-  const saveTitle = async (event: FormEvent, key: string) => {
-    event.preventDefault();
-    if (!editing || editing.key !== key) return;
-    try {
-      dispatch({ type: 'series-renamed', key, series: await renameSeries(key, editing.title) });
-    } catch (caught) {
-      dispatch({ type: 'management-failed', key, message: (caught as Error).message });
-    }
-  };
-
-  const remove = async (series: LibrarySeries) => {
-    if (!window.confirm(`Remove ${series.title} and its Visited Log?`)) return;
-    try {
-      await removeSeries(series.key);
-      dispatch({ type: 'series-removed', key: series.key });
-    } catch (caught) {
-      dispatch({ type: 'management-failed', key: series.key, message: (caught as Error).message });
-    }
-  };
-
-  return <section className="series-library" aria-labelledby="series-library-title">
-    <div className="section-heading"><div><p className="eyebrow">Recently read</p><h2 id="series-library-title">Series</h2></div><span>{library.series.length}</span></div>
-    {loading && <p className="library-status">Loading Library…</p>}
-    {error && <ErrorMessage error={error} retry={() => { dispatch({ type: 'library-refresh-started' }); void refresh(); }} />}
-    {!loading && !error && library.series.length === 0 && <p className="library-status">No Series yet. Open a Chapter to begin.</p>}
-    <div className="series-list">
-      {library.series.map((series) => {
-        const headingId = `series-${series.key.replace(/[^a-z0-9_-]/gi, '-')}`;
-        const resumeChapter = series.chapters.find((chapter) => chapter.url === series.resumeChapterUrl);
-        const isExpanded = expanded.has(series.key);
-        const openError = seriesErrors[series.key];
-        return <article className="series-card" key={series.key} aria-labelledby={headingId}>
-          <div className="series-summary">
-            <button type="button" className="resume-series" onClick={() => { void openFromLibrary(series.key, series.resumeChapterUrl); }} disabled={seriesPending === series.key} aria-label={`Resume ${series.title}`}>
-              <span className="series-copy"><h3 id={headingId}>{series.title}</h3><span className="resume-label">Resume Chapter</span><strong>{resumeChapter?.title ?? series.resumeChapterUrl}</strong></span>
-              <time dateTime={series.lastReadAt}>Last read {new Date(series.lastReadAt).toLocaleString()}</time>
-            </button>
-            <div className="series-actions">
-              <button type="button" className="quiet-button" onClick={() => dispatch({ type: 'log-toggled', key: series.key })} aria-expanded={isExpanded} aria-controls={`${headingId}-log`} aria-label={`${isExpanded ? 'Hide' : 'Show'} Visited Log for ${series.title}`}>Visited Log <span aria-hidden="true">{isExpanded ? '−' : '+'}</span></button>
-              <button type="button" className="quiet-button" onClick={() => dispatch({ type: 'edit-started', series })} aria-label={`Rename ${series.title}`}>Rename</button>
-              <button type="button" className="quiet-button danger-button" onClick={() => { void remove(series); }} aria-label={`Remove ${series.title}`}>Remove</button>
-            </div>
-          </div>
-
-          {editing?.key === series.key && <form className="rename-form" onSubmit={(event) => { void saveTitle(event, series.key); }}>
-            <label htmlFor={`${headingId}-title`}>Series title</label><div className="form-row"><input id={`${headingId}-title`} required value={editing.title} onChange={(event) => dispatch({ type: 'edit-changed', title: event.target.value })} autoFocus/><button type="submit">Save title</button><button type="button" className="quiet-button" onClick={() => dispatch({ type: 'edit-cancelled' })}>Cancel</button></div>
-          </form>}
-          {managementErrors[series.key] && <p className="management-error" role="alert">{managementErrors[series.key]}</p>}
-          {openError && <ErrorMessage error={openError.error} retry={() => { void openFromLibrary(series.key, openError.url); }} />}
-
-          {isExpanded && <section className="visited-log" id={`${headingId}-log`} aria-label={`Visited Log for ${series.title}`}>
-            <ol>{series.chapters.map((chapter) => <li key={chapter.url}>
-              <button type="button" className="chapter-row" disabled={seriesPending === series.key} onClick={() => { void openFromLibrary(series.key, chapter.url); }} aria-label={`Re-read ${chapter.title}`}>
-                <span><strong>{chapter.title}</strong><small>{chapter.pageCount} Pages</small></span>
-                <time dateTime={chapter.firstOpenedAt}>{new Date(chapter.firstOpenedAt).toLocaleDateString()}</time>
-              </button>
-            </li>)}</ol>
-          </section>}
-        </article>;
-      })}
-    </div>
-  </section>;
-}
-
 export function App({
   openChapter = defaultOpenChapter,
   peekChapter = defaultPeekChapter,
   completeChapter = defaultCompleteChapter,
   getLibrary = defaultGetLibrary,
   renameSeries = defaultRenameSeries,
-  removeSeries = defaultRemoveSeries
+  removeSeries = defaultRemoveSeries,
+  setSeriesCover = defaultSetSeriesCover
 }: AppProps) {
   const [state, dispatch] = useReducer(readerReducer, initialReaderState);
   const {
@@ -618,7 +487,14 @@ export function App({
   }
 
   return <main className="library-shell"><div className="library-content">
-    <PasteCard openChapter={openChapter} onOpened={startSession} />
-    <LibrarySection getLibrary={getLibrary} openChapter={openChapter} renameSeries={renameSeries} removeSeries={removeSeries} onOpened={startSession} />
+    <LibraryShelf
+      getLibrary={getLibrary}
+      openChapter={openChapter}
+      peekChapter={peekChapter}
+      renameSeries={renameSeries}
+      removeSeries={removeSeries}
+      setSeriesCover={setSeriesCover}
+      onOpened={startSession}
+    />
   </div></main>;
 }

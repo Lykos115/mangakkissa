@@ -8,7 +8,6 @@ export interface LibraryState {
   error?: OpenError;
   seriesPending?: string;
   seriesErrors: Record<string, SeriesOpenFailure>;
-  expanded: ReadonlySet<string>;
   editing?: { key: string; title: string };
   managementErrors: Record<string, string>;
 }
@@ -17,7 +16,6 @@ export const initialLibraryState: LibraryState = {
   library: { series: [] },
   loading: true,
   seriesErrors: {},
-  expanded: new Set(),
   managementErrors: {}
 };
 
@@ -28,11 +26,10 @@ export type LibraryAction =
   | { type: 'series-open-started'; key: string }
   | { type: 'series-open-failed'; key: string; failure: SeriesOpenFailure }
   | { type: 'series-open-finished' }
-  | { type: 'log-toggled'; key: string }
   | { type: 'edit-started'; series: LibrarySeries }
   | { type: 'edit-changed'; title: string }
   | { type: 'edit-cancelled' }
-  | { type: 'series-renamed'; key: string; series: LibrarySeries }
+  | { type: 'series-updated'; series: LibrarySeries }
   | { type: 'series-removed'; key: string }
   | { type: 'management-failed'; key: string; message: string };
 
@@ -56,23 +53,18 @@ export function libraryReducer(state: LibraryState, action: LibraryAction): Libr
       return { ...state, seriesErrors: { ...state.seriesErrors, [action.key]: action.failure } };
     case 'series-open-finished':
       return { ...state, seriesPending: undefined };
-    case 'log-toggled': {
-      const expanded = new Set(state.expanded);
-      if (expanded.has(action.key)) expanded.delete(action.key); else expanded.add(action.key);
-      return { ...state, expanded };
-    }
     case 'edit-started':
       return { ...state, editing: { key: action.series.key, title: action.series.title } };
     case 'edit-changed':
       return state.editing ? { ...state, editing: { ...state.editing, title: action.title } } : state;
     case 'edit-cancelled':
       return { ...state, editing: undefined };
-    case 'series-renamed':
+    case 'series-updated':
       return {
         ...state,
-        library: { series: state.library.series.map((entry) => entry.key === action.key ? action.series : entry) },
+        library: { series: state.library.series.map((entry) => entry.key === action.series.key ? action.series : entry) },
         editing: undefined,
-        managementErrors: without(state.managementErrors, action.key)
+        managementErrors: without(state.managementErrors, action.series.key)
       };
     case 'series-removed':
       return { ...state, library: { series: state.library.series.filter((entry) => entry.key !== action.key) } };

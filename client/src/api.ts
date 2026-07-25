@@ -58,6 +58,10 @@ export async function renameSeries(key: string, title: string): Promise<LibraryS
   return requestJson(appUrl(`api/series/${encodeURIComponent(key)}`), jsonRequest('PATCH', { title }));
 }
 
+export async function setSeriesCover(key: string, coverUrl: string): Promise<LibrarySeries> {
+  return requestJson(appUrl(`api/series/${encodeURIComponent(key)}`), jsonRequest('PATCH', { coverUrl }));
+}
+
 export async function removeSeries(key: string): Promise<void> {
   await request(appUrl(`api/series/${encodeURIComponent(key)}`), { method: 'DELETE' });
 }
