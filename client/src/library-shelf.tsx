@@ -3,7 +3,7 @@
 // Covers come from series.coverPageUrl (auto-set by the server from the first
 // opened Chapter); Series without one fall back to peeking their first visited
 // Chapter, then to a generated gradient cover.
-import { FormEvent, useCallback, useEffect, useReducer, useState } from 'react';
+import { FormEvent, useCallback, useEffect, useReducer, useRef, useState } from 'react';
 import {
   getLibrary as defaultGetLibrary,
   openChapter as defaultOpenChapter,
@@ -28,8 +28,11 @@ const hashHue = (text: string) => {
 };
 
 function Cover({ title, pageUrl }: { title: string; pageUrl?: string }) {
+  return <CoverImage key={pageUrl} title={title} pageUrl={pageUrl} />;
+}
+
+function CoverImage({ title, pageUrl }: { title: string; pageUrl?: string }) {
   const [broken, setBroken] = useState(false);
-  useEffect(() => setBroken(false), [pageUrl]);
   if (!pageUrl || broken) {
     const hue = hashHue(title);
     return <div className="shelf-cover shelf-cover-fallback" role="img" aria-label={`No cover for ${title}`}
@@ -179,8 +182,15 @@ function CoverPicker({ series, peekChapter, onPick, onClose }: {
   onPick: (pageUrl: string) => void;
   onClose: () => void;
 }) {
+  const dialogRef = useRef<HTMLDialogElement>(null);
   const [candidates, setCandidates] = useState<{ chapter: string; url: string }[]>([]);
   const [pending, setPending] = useState(true);
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+    if (typeof dialog.showModal === 'function') dialog.showModal();
+    else dialog.setAttribute('open', '');
+  }, []);
   useEffect(() => {
     let current = true;
     setPending(true);
@@ -200,9 +210,9 @@ function CoverPicker({ series, peekChapter, onPick, onClose }: {
     });
     return () => { current = false; };
   }, [series, peekChapter]);
-  return <div className="picker-backdrop" onClick={onClose}>
-    <div className="picker" role="dialog" aria-modal="true" aria-label={`Choose a cover for ${series.title}`}
-      onClick={(event) => event.stopPropagation()}>
+  return <dialog ref={dialogRef} className="picker-backdrop" aria-label={`Choose a cover for ${series.title}`}
+    onClose={onClose}>
+    <div className="picker">
       <h3>Choose a cover</h3>
       <p className="picker-hint">First page of each visited Chapter.</p>
       {pending && <p className="library-status">Loading chapter pages…</p>}
@@ -216,7 +226,8 @@ function CoverPicker({ series, peekChapter, onPick, onClose }: {
       </div>
       <button type="button" className="quiet-button" onClick={onClose}>Cancel</button>
     </div>
-  </div>;
+    <button type="button" className="picker-dismiss" aria-label="Close cover picker" onClick={onClose} />
+  </dialog>;
 }
 
 function SeriesScreen({ series, data, api, coverPageUrl, onBack }: {
