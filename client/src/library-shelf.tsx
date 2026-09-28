@@ -53,6 +53,25 @@ const resumeTitle = (series: LibrarySeries) =>
 
 const lastRead = (series: LibrarySeries) => new Date(series.lastReadAt).toLocaleDateString();
 
+const STAMP_CARD_SIZE = 10;
+
+// One coffee stamp per finished Chapter; a full card rolls over to a fresh one.
+function StampCard({ series }: { series: LibrarySeries }) {
+  const { done } = progressOf(series);
+  const stamped = done % STAMP_CARD_SIZE || (done ? STAMP_CARD_SIZE : 0);
+  const fullCards = Math.floor((done - 1) / STAMP_CARD_SIZE);
+  return <div className="stamp-card">
+    <p className="stamp-card-head">Stamp card <small>one cup per finished Chapter</small></p>
+    <ol className="stamps" aria-label={`${stamped} of ${STAMP_CARD_SIZE} stamps`}>
+      {Array.from({ length: STAMP_CARD_SIZE }, (_, index) =>
+        <li key={index} className={index < stamped ? 'stamped' : undefined} style={{ rotate: `${(hashHue(`${series.key}${index}`) % 24) - 12}deg` }} />)}
+    </ol>
+    <p className="stamp-card-foot">{stamped === STAMP_CARD_SIZE
+      ? 'Full card — a dessert on the house 🍮'
+      : `${STAMP_CARD_SIZE - stamped} more for a free dessert${fullCards > 0 ? ` · ${fullCards} full card${fullCards > 1 ? 's' : ''} so far` : ''}`}</p>
+  </div>;
+}
+
 interface ShelfApi {
   getLibrary: typeof defaultGetLibrary;
   openChapter: typeof defaultOpenChapter;
@@ -155,7 +174,7 @@ function PasteBar({ openChapter, onOpened }: { openChapter: typeof defaultOpenCh
     }
   };
   return <form className="shelf-paste" onSubmit={(event) => { void submit(event); }}>
-    <input type="url" required value={url} aria-label="Chapter URL" placeholder="Paste a Chapter URL to add it to the shelf…"
+    <input type="url" required value={url} aria-label="Chapter URL" placeholder="Order a new Chapter — paste its URL…"
       onChange={(event) => setUrl(event.target.value)} />
     <button type="submit" disabled={pending}>{pending ? 'Opening…' : 'Open'}</button>
     {error && <ErrorMessage error={error} retry={() => { void submit(); }} />}
@@ -279,6 +298,7 @@ function SeriesScreen({ series, data, api, coverPageUrl, onBack }: {
         </div>
         {managementErrors[series.key] && <p className="shelf-paste-error" role="alert">{managementErrors[series.key]}</p>}
         {openError && <ErrorMessage error={openError.error} retry={() => { void openFromLibrary(series.key, openError.url); }} />}
+        <StampCard series={series} />
         <h2 className="shelf-chapters-heading">Chapters</h2>
         <ChapterList series={series} data={data} />
       </div>
@@ -320,8 +340,9 @@ export function LibraryShelf({
   }
 
   return <>
+    <div className="cafe-pendant" aria-hidden="true" />
     <header className="shelf-topbar">
-      <h1><span className="eyebrow">Local manga reader</span>The Shelf</h1>
+      <h1><span className="eyebrow">喫茶 ねみる · open late</span>Kissa Nemiru</h1>
       <PasteBar openChapter={openChapter} onOpened={onOpened} />
     </header>
     {loading && <p className="library-status">Loading Library…</p>}

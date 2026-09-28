@@ -30,6 +30,27 @@ const upscaleUrl = (url: string) => `${proxyUrl(url)}&upscale=2`;
 
 const CHAPTER_TOAST_DURATION_MS = 1800;
 
+const LAMP_STORAGE_KEY = 'manga-reader:lamp';
+const DEFAULT_LAMP = 60;
+
+// The reading-room lamp: warms and dims the surround, never the Pages.
+// Remembered per browser; storage may be unavailable, so it's best-effort.
+function useLamp() {
+  const [lamp, setLamp] = useState(() => {
+    try {
+      const stored = Number(localStorage.getItem(LAMP_STORAGE_KEY));
+      return stored >= 10 && stored <= 100 ? stored : DEFAULT_LAMP;
+    } catch {
+      return DEFAULT_LAMP;
+    }
+  });
+  const changeLamp = (value: number) => {
+    setLamp(value);
+    try { localStorage.setItem(LAMP_STORAGE_KEY, String(value)); } catch { /* keep the in-memory value */ }
+  };
+  return [lamp, changeLamp] as const;
+}
+
 const withMeasuredSizes = (pages: ReaderPage[], sizes: Record<string, PageSize>) =>
   pages.map((page) => sizes[page.url] ? { ...page, ...sizes[page.url] } : page);
 
@@ -75,7 +96,7 @@ function PageMedia({ page, pageNumber, state, thumbnail = false, loading, upscal
   </span>;
 }
 
-function ReaderHeader({ seriesTitle, chapterTitle, spreadLabel, upscalerBroken, fit, coverSolo, skipLetteredChapters, toggleDisabled, navigationRefreshPending, navigationRefreshError, onLeave, onCycleFit, onTogglePairing, onSkipChange, onRetryRefresh }: {
+function ReaderHeader({ seriesTitle, chapterTitle, spreadLabel, upscalerBroken, fit, coverSolo, skipLetteredChapters, toggleDisabled, navigationRefreshPending, navigationRefreshError, lamp, onLeave, onCycleFit, onTogglePairing, onSkipChange, onRetryRefresh, onLampChange }: {
   seriesTitle: string;
   chapterTitle: string;
   spreadLabel: string;
@@ -86,17 +107,24 @@ function ReaderHeader({ seriesTitle, chapterTitle, spreadLabel, upscalerBroken, 
   toggleDisabled: boolean;
   navigationRefreshPending: boolean;
   navigationRefreshError?: NavigationRefreshFailure;
+  lamp: number;
   onLeave: () => void;
   onCycleFit: () => void;
   onTogglePairing: () => void;
   onSkipChange: (requestedValue: boolean) => void;
   onRetryRefresh: (requestedValue: boolean) => void;
+  onLampChange: (value: number) => void;
 }) {
   return <header className="reader-header">
     <button type="button" className="quiet-button" onClick={onLeave}>Library</button>
     <div className="reader-title"><strong>{seriesTitle}</strong><span aria-hidden="true"> — </span><h1>{chapterTitle}</h1></div>
     <span className="spread-count">{spreadLabel}</span>
     <div className="reader-controls">
+      <label className="lamp-dimmer" title="Lamp">
+        <span aria-hidden="true">🕯</span>
+        <input type="range" min={10} max={100} value={lamp} aria-label="Lamp brightness"
+          onChange={(event) => onLampChange(Number(event.target.value))} />
+      </label>
       {upscalerBroken && <span className="upscale-error" role="alert">Spread upscaling isn’t working — originals are shown.</span>}
       <button type="button" className="quiet-button" onClick={onCycleFit}>{fitOptions.find((option) => option.mode === fit)?.label} <kbd>f</kbd></button>
       <button type="button" className="quiet-button" aria-pressed={!coverSolo} onClick={onTogglePairing}>Shift pairing <kbd>p</kbd></button>
@@ -134,7 +162,7 @@ function EndCard({ chapterTitle, chapterUrl, continuationUrl, continuationPendin
   onLeave: () => void;
 }) {
   return <section className="end-card" aria-labelledby="end-card-title">
-    <p className="eyebrow">Chapter complete</p>
+    <p className="eyebrow"><span lang="ja">おかわり？</span> Chapter complete</p>
     <h2 id="end-card-title">End of {chapterTitle} — no next chapter found.</h2>
     <p>If there is one, paste its URL:</p>
     <form className="continuation-form" onSubmit={onContinue}>
@@ -237,6 +265,7 @@ export function App({
   const [measuredSizes, setMeasuredSizes] = useState<Record<string, PageSize>>({});
   const [upscales, setUpscales] = useState<Record<string, 'ready' | 'failed'>>({});
   const [upscalerBroken, setUpscalerBroken] = useState(false);
+  const [lamp, setLamp] = useLamp();
   const navigationRefreshGeneration = useRef(0);
   const completedChapters = useRef(new Set<string>());
   const currentThumbnail = useRef<HTMLButtonElement>(null);
@@ -415,7 +444,7 @@ export function App({
     const spread = spreads[activeSpreadIndex];
     const progress = atEnd ? 100 : Math.round(((activeSpreadIndex + 1) / spreads.length) * 100);
     const doubledWidth = spread.length === 1 && widePages.has(spread[0]);
-    return <main className={`reader-shell ${chromeVisible ? '' : 'immersive'}`}>
+    return <main className={`reader-shell ${chromeVisible ? '' : 'immersive'}`} style={{ '--lamp': lamp / 100 } as React.CSSProperties}>
       {announceChapterChange && <div className="chapter-toast" role="status">Now reading {opened.chapter.title}</div>}
       {chromeVisible && <ReaderHeader
         seriesTitle={opened.series.title}
@@ -428,11 +457,13 @@ export function App({
         toggleDisabled={navigationRefreshPending || transitionPending}
         navigationRefreshPending={navigationRefreshPending}
         navigationRefreshError={navigationRefreshError}
+        lamp={lamp}
         onLeave={leaveReader}
         onCycleFit={() => dispatch({ type: 'fit-cycled' })}
         onTogglePairing={() => dispatch({ type: 'pairing-toggled' })}
         onSkipChange={(requestedValue) => { void refreshNavigation(requestedValue); }}
         onRetryRefresh={(requestedValue) => { void refreshNavigation(requestedValue); }}
+        onLampChange={setLamp}
       />}
 
       <section className={`reader-stage fit-${fit}`} data-testid="reader-stage">
