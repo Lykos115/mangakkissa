@@ -1,125 +1,33 @@
 import express from 'express';
+import { normalizeAppBasePath } from '../shared/app-base.js';
+import type { OpenPayload } from '../shared/contract.js';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { friendlyDetail } from './errors.js';
-import { normalizeChapterUrl, resolveAdjacentChapterUrls, type ResolvedChapterNavigation } from './chapter-navigation.js';
+import { normalizeChapterUrl } from './chapter-navigation.js';
+import { ExtractionCache, ExtractionFailure, type ResolvedChapter } from './extraction-cache.js';
 import { genericExtractor } from './extractors/generic.js';
 import { ExtractorRegistry } from './extractors/registry.js';
 import { ImagePipeline, type PageFetchFailure } from './image-pipeline.js';
 import type { LibraryStore } from './storage/library-store.js';
-import type { ExtractError, ExtractResult } from './types.js';
+import type { Fetcher } from './types.js';
+import type { Upscaler } from './upscaler.js';
 
-export type Fetcher = (url: string, init?: RequestInit) => Promise<Response>;
-interface AppOptions { store: LibraryStore; fetcher?: Fetcher; clientDir: string; imageCacheMaxBytes?: number }
+interface AppOptions { store: LibraryStore; fetcher?: Fetcher; clientDir: string; imageCacheMaxBytes?: number; upscaler?: Upscaler; basePath?: string }
 
 const registry = new ExtractorRegistry([genericExtractor]);
 
-export function createApp({ store, fetcher = fetch, clientDir, imageCacheMaxBytes }: AppOptions) {
+export function createApp({ store, fetcher = fetch, clientDir, imageCacheMaxBytes, upscaler, basePath = '/' }: AppOptions) {
   const app = express();
+  const router = express.Router();
   const imagePipeline = new ImagePipeline(fetcher, imageCacheMaxBytes);
-  const pageHeaders = new Map<string, { referer?: string; userAgent?: string }>();
-  interface ChapterExtraction {
-    url: string;
-    extracted: ExtractResult;
-    seriesKey: string;
-    seriesTitle: string;
-    chapterTitle: string;
-  }
-  interface ResolvedChapter {
-    chapter: ChapterExtraction;
-    navigation: ResolvedChapterNavigation;
-  }
-  interface ChapterFailure { httpStatus: number; body: ExtractError }
-  const extractionCache = new Map<string, Promise<ChapterExtraction>>();
-  const extractionWindows = new Map<string, Set<string>>();
-  const chapterPageUrls = new Map<string, string[]>();
+  const extractions = new ExtractionCache(fetcher, registry);
 
   const parseChapterUrl = (value: unknown): URL | undefined =>
     normalizeChapterUrl(typeof value === 'string' ? value : '');
 
-  const extractChapter = (chapterUrl: URL): Promise<ChapterExtraction> => {
-    const cached = extractionCache.get(chapterUrl.href);
-    if (cached) return cached;
-    const pending = (async () => {
-      let upstream: Response;
-      try {
-        upstream = await fetcher(chapterUrl.href, { headers: { Accept: 'text/html,application/xhtml+xml' } });
-      } catch (error) {
-        throw { httpStatus: 502, body: { error: 'FETCH_FAILED', detail: `Chapter fetch failed: ${friendlyDetail(error)}` } } satisfies ChapterFailure;
-      }
-      if (!upstream.ok) {
-        throw { httpStatus: 502, body: { error: 'FETCH_FAILED', status: upstream.status, detail: `Chapter site returned HTTP ${upstream.status}.` } } satisfies ChapterFailure;
-      }
-
-      let extracted: ExtractResult | ExtractError;
-      try {
-        extracted = registry.extract(await upstream.text(), chapterUrl.href);
-      } catch (error) {
-        extracted = { error: 'NO_PAGE_RUN', detail: `The Chapter could not be parsed: ${friendlyDetail(error)}` };
-      }
-      if ('error' in extracted) throw { httpStatus: 422, body: extracted } satisfies ChapterFailure;
-
-      const pageUrls = extracted.pages.map((page) => new URL(page.url).href);
-      const policy = extracted.imageHeaders ?? { referer: chapterUrl.href };
-      chapterPageUrls.set(chapterUrl.href, pageUrls);
-      for (const pageUrl of pageUrls) pageHeaders.set(pageUrl, policy);
-      return {
-        url: chapterUrl.href,
-        extracted,
-        seriesKey: extracted.seriesKey ?? chapterUrl.hostname.toLowerCase(),
-        chapterTitle: extracted.chapterTitle ?? decodeURIComponent(chapterUrl.pathname.split('/').filter(Boolean).at(-1) ?? 'Untitled Chapter'),
-        seriesTitle: extracted.seriesTitle ?? chapterUrl.hostname
-      };
-    })();
-    extractionCache.set(chapterUrl.href, pending);
-    void pending.catch(() => { if (extractionCache.get(chapterUrl.href) === pending) extractionCache.delete(chapterUrl.href); });
-    return pending;
-  };
-
-  const navigationSource = (chapter: ChapterExtraction) => ({
-    url: chapter.url,
-    chapterTitle: chapter.chapterTitle,
-    nextUrl: chapter.extracted.nextUrl,
-    prevUrl: chapter.extracted.prevUrl
-  });
-  const resolveChapter = async (chapter: ChapterExtraction, skipLettered: boolean): Promise<ResolvedChapter> => ({
-    chapter,
-    navigation: await resolveAdjacentChapterUrls(
-      navigationSource(chapter),
-      async (url) => navigationSource(await extractChapter(url)),
-      skipLettered
-    )
-  });
-
-  const retainedExtractionUrls = () => new Set([...extractionWindows.values()].flatMap((window) => [...window]));
-  const evictExtractions = (chapterUrls: string[]) => {
-    const evictedPages: string[] = [];
-    for (const chapterUrl of chapterUrls) {
-      extractionCache.delete(chapterUrl);
-      evictedPages.push(...(chapterPageUrls.get(chapterUrl) ?? []));
-      chapterPageUrls.delete(chapterUrl);
-    }
-    const pagesStillRetained = new Set([...chapterPageUrls.values()].flat());
-    for (const pageUrl of evictedPages) {
-      if (!pagesStillRetained.has(pageUrl)) pageHeaders.delete(pageUrl);
-    }
-  };
-  const evictUnretainedExtractions = () => {
-    const retained = retainedExtractionUrls();
-    evictExtractions([...extractionCache.keys()].filter((chapterUrl) => !retained.has(chapterUrl)));
-  };
-  const retainExtractionWindow = ({ chapter, navigation }: ResolvedChapter) => {
-    const retained = new Set<string>([chapter.url]);
-    for (const adjacent of [navigation.prevUrl, navigation.nextUrl]) {
-      const parsed = parseChapterUrl(adjacent);
-      if (parsed) retained.add(parsed.href);
-    }
-    extractionWindows.set(chapter.seriesKey, retained);
-    const retainedByAnySeries = retainedExtractionUrls();
-    evictExtractions([...extractionCache.keys()].filter((cachedUrl) => !retainedByAnySeries.has(cachedUrl)));
-  };
-
-  const chapterPayload = ({ chapter, navigation }: ResolvedChapter) => ({
+  const upscalerStatus: 'ready' | 'unconfigured' = upscaler ? 'ready' : 'unconfigured';
+  const chapterPayload = ({ chapter, navigation }: ResolvedChapter): OpenPayload['chapter'] => ({
     url: chapter.url,
     title: chapter.chapterTitle,
     pages: chapter.extracted.pages,
@@ -128,37 +36,47 @@ export function createApp({ store, fetcher = fetch, clientDir, imageCacheMaxByte
   });
 
   const sendChapterFailure = (response: express.Response, error: unknown) => {
-    const failure = error as Partial<ChapterFailure>;
-    if (failure.httpStatus && failure.body) response.status(failure.httpStatus).json(failure.body);
+    if (error instanceof ExtractionFailure) response.status(error.httpStatus).json(error.body);
     else response.status(500).json({ error: 'FETCH_FAILED', detail: `Chapter extraction failed: ${friendlyDetail(error)}` });
   };
 
   app.disable('x-powered-by');
-  app.use(express.json({ limit: '32kb' }));
+  router.use(express.json({ limit: '32kb' }));
 
-  app.get('/api/library', (_request, response) => {
+  router.get('/api/library', (_request, response) => {
     response.json(store.library());
   });
 
-  app.patch('/api/series/:key', async (request, response) => {
-    const title = typeof request.body?.title === 'string' ? request.body.title.trim() : '';
-    if (!title) {
+  router.patch('/api/series/:key', async (request, response) => {
+    const title = typeof request.body?.title === 'string' ? request.body.title.trim() : undefined;
+    const coverUrl = request.body?.coverUrl === undefined ? undefined : parseChapterUrl(request.body.coverUrl);
+    if (title !== undefined && !title) {
       response.status(400).json({ error: 'INVALID_TITLE', detail: 'A non-empty Series title is required.' });
       return;
     }
+    if (request.body?.coverUrl !== undefined && !coverUrl) {
+      response.status(400).json({ error: 'INVALID_COVER_URL', detail: 'A valid HTTP or HTTPS Page URL is required.' });
+      return;
+    }
+    if (title === undefined && coverUrl === undefined) {
+      response.status(400).json({ error: 'NOTHING_TO_UPDATE', detail: 'Provide a title or coverUrl to update.' });
+      return;
+    }
     try {
-      const series = await store.renameSeries(request.params.key, title);
+      let series = await store.findSeries(request.params.key);
       if (!series) {
         response.status(404).json({ error: 'SERIES_NOT_FOUND', detail: 'Series not found.' });
         return;
       }
+      if (coverUrl !== undefined) series = await store.setCover(request.params.key, coverUrl.href) ?? series;
+      if (title !== undefined) series = await store.renameSeries(request.params.key, title) ?? series;
       response.json(series);
     } catch (error) {
       response.status(500).json({ error: 'FETCH_FAILED', detail: `Library update failed: ${friendlyDetail(error)}` });
     }
   });
 
-  app.delete('/api/series/:key', async (request, response) => {
+  router.delete('/api/series/:key', async (request, response) => {
     try {
       if (!await store.removeSeries(request.params.key)) {
         response.status(404).json({ error: 'SERIES_NOT_FOUND', detail: 'Series not found.' });
@@ -170,7 +88,7 @@ export function createApp({ store, fetcher = fetch, clientDir, imageCacheMaxByte
     }
   });
 
-  app.post('/api/chapter/open', async (request, response) => {
+  router.post('/api/chapter/open', async (request, response) => {
     const chapterUrl = parseChapterUrl(request.body?.url);
     if (!chapterUrl) {
       response.status(400).json({ error: 'FETCH_FAILED', detail: 'A valid HTTP or HTTPS Chapter URL is required.' });
@@ -178,31 +96,28 @@ export function createApp({ store, fetcher = fetch, clientDir, imageCacheMaxByte
     }
     const skipLettered = request.body?.skipLettered === true;
     try {
-      const chapter = await extractChapter(chapterUrl);
-      const resolved = await resolveChapter(chapter, skipLettered);
+      const resolved = await extractions.resolve(chapterUrl, skipLettered);
+      const { chapter } = resolved;
       const recorded = await store.recordOpen(
         { key: chapter.seriesKey, title: chapter.seriesTitle },
-        { url: chapter.url, title: chapter.chapterTitle, pageCount: chapter.extracted.pages.length }
+        { url: chapter.url, title: chapter.chapterTitle, pageCount: chapter.extracted.pages.length, firstPageUrl: chapter.extracted.pages[0]?.url }
       );
-      retainExtractionWindow(resolved);
+      extractions.retainWindow(resolved);
       response.json({
         chapter: chapterPayload(resolved),
         series: { key: recorded.series.key, title: recorded.series.title, resumeChapterUrl: recorded.series.resumeChapterUrl },
-        reread: recorded.reread
-      });
-      if (resolved.navigation.nextUrl) {
-        const nextUrl = parseChapterUrl(resolved.navigation.nextUrl);
-        if (nextUrl) void extractChapter(nextUrl).catch(() => undefined);
-      }
+        reread: recorded.reread,
+        upscaler: upscalerStatus
+      } satisfies OpenPayload);
+      extractions.prefetch(resolved.navigation.nextUrl);
     } catch (error) {
-      evictUnretainedExtractions();
-      const failure = error as Partial<ChapterFailure>;
-      if (failure.httpStatus) sendChapterFailure(response, error);
+      extractions.evictUnretained();
+      if (error instanceof ExtractionFailure) sendChapterFailure(response, error);
       else response.status(500).json({ error: 'FETCH_FAILED', detail: `Library update failed: ${friendlyDetail(error)}` });
     }
   });
 
-  app.get('/api/chapter/peek', async (request, response) => {
+  router.get('/api/chapter/peek', async (request, response) => {
     const chapterUrl = parseChapterUrl(request.query.url);
     if (!chapterUrl) {
       response.status(400).json({ error: 'FETCH_FAILED', detail: 'A valid HTTP or HTTPS Chapter URL is required.' });
@@ -211,8 +126,8 @@ export function createApp({ store, fetcher = fetch, clientDir, imageCacheMaxByte
     const skipLettered = request.query.skipLettered === '1';
     const retainAsCurrent = request.query.current === '1';
     try {
-      const chapter = await extractChapter(chapterUrl);
-      const resolved = await resolveChapter(chapter, skipLettered);
+      const resolved = await extractions.resolve(chapterUrl, skipLettered);
+      const { chapter } = resolved;
       const existing = store.findSeries(chapter.seriesKey);
       response.json({
         chapter: chapterPayload(resolved),
@@ -221,17 +136,18 @@ export function createApp({ store, fetcher = fetch, clientDir, imageCacheMaxByte
           title: existing?.title ?? chapter.seriesTitle,
           resumeChapterUrl: existing?.resumeChapterUrl ?? chapter.url
         },
-        reread: existing?.chapters.some((entry) => entry.url === chapter.url) ?? false
-      });
-      if (retainAsCurrent) retainExtractionWindow(resolved);
-      else evictUnretainedExtractions();
+        reread: existing?.chapters.some((entry) => entry.url === chapter.url) ?? false,
+        upscaler: upscalerStatus
+      } satisfies OpenPayload);
+      if (retainAsCurrent) extractions.retainWindow(resolved);
+      else extractions.evictUnretained();
     } catch (error) {
-      evictUnretainedExtractions();
+      extractions.evictUnretained();
       sendChapterFailure(response, error);
     }
   });
 
-  app.post('/api/chapter/complete', async (request, response) => {
+  router.post('/api/chapter/complete', async (request, response) => {
     const chapterUrl = parseChapterUrl(request.body?.url);
     if (!chapterUrl) {
       response.status(400).json({ error: 'FETCH_FAILED', detail: 'A valid HTTP or HTTPS Chapter URL is required.' });
@@ -248,7 +164,7 @@ export function createApp({ store, fetcher = fetch, clientDir, imageCacheMaxByte
     }
   });
 
-  app.get('/api/image', async (request, response) => {
+  router.get('/api/image', async (request, response) => {
     let source: URL;
     try {
       source = new URL(String(request.query.url ?? ''));
@@ -257,10 +173,30 @@ export function createApp({ store, fetcher = fetch, clientDir, imageCacheMaxByte
       response.status(400).json({ error: 'FETCH_FAILED', detail: 'A valid HTTP or HTTPS Page URL is required.' });
       return;
     }
-    const policy = pageHeaders.get(source.href) ?? {};
+    const policy = extractions.headersFor(source.href);
     const headers: Record<string, string> = { Accept: 'image/*' };
     if (policy.referer) headers.Referer = policy.referer;
     if (policy.userAgent) headers['User-Agent'] = policy.userAgent;
+    if (request.query.upscale !== undefined) {
+      if (request.query.upscale !== '2') {
+        response.status(400).json({ error: 'UPSCALE_FAILED', detail: 'Only upscale=2 is supported.' });
+        return;
+      }
+      if (!upscaler) {
+        response.status(404).json({ error: 'UPSCALER_UNCONFIGURED', detail: 'No upscaler binary is configured.' });
+        return;
+      }
+      try {
+        const upscaled = await upscaler.upscale(source, () => imagePipeline.get(source, headers));
+        response.set('Content-Type', upscaled.contentType);
+        response.set('Cache-Control', 'max-age=86400, immutable');
+        response.send(upscaled.body);
+      } catch (error) {
+        const failure = error as PageFetchFailure;
+        response.status(502).json({ error: 'UPSCALE_FAILED', detail: failure.detail ?? `Upscale failed: ${friendlyDetail(error)}` });
+      }
+      return;
+    }
     try {
       const page = await imagePipeline.get(source, headers, request.query.retry !== undefined);
       response.set('Content-Type', page.contentType);
@@ -277,11 +213,12 @@ export function createApp({ store, fetcher = fetch, clientDir, imageCacheMaxByte
   });
 
   if (existsSync(clientDir)) {
-    app.use(express.static(clientDir));
-    app.use((request, response, next) => {
-      if (request.method !== 'GET' || request.path.startsWith('/api/')) return next();
+    router.use(express.static(clientDir));
+    router.use((request, response, next) => {
+      if (request.method !== 'GET' || request.path === '/api' || request.path.startsWith('/api/')) return next();
       response.sendFile(join(clientDir, 'index.html'));
     });
   }
+  app.use(normalizeAppBasePath(basePath, '/'), router);
   return app;
 }

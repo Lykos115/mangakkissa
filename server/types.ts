@@ -1,8 +1,8 @@
-export interface Page {
-  url: string;
-  width?: number;
-  height?: number;
-}
+import type { Page } from '../shared/contract.js';
+
+export type { Page } from '../shared/contract.js';
+
+export type Fetcher = (url: string, init?: RequestInit) => Promise<Response>;
 
 export interface ExtractResult {
   pages: Page[];
@@ -21,11 +21,3 @@ export interface Extractor {
   matches(url: string): boolean;
   extract(html: string, url: string): ExtractResult | ExtractError;
 }
-
-export interface VisitedChapter {
-  url: string; title: string; pageCount: number; firstOpenedAt: string; completed: boolean;
-}
-export interface LibrarySeries {
-  key: string; title: string; resumeChapterUrl: string; addedAt: string; lastReadAt: string; chapters: VisitedChapter[];
-}
-export interface Library { series: LibrarySeries[] }

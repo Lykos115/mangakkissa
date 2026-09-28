@@ -4,8 +4,10 @@ import type { Server } from 'node:http';
 import { networkInterfaces } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { appBaseUrl, normalizeAppBasePath } from '../shared/app-base.js';
 import { createApp } from './app.js';
 import { LibraryStore } from './storage/library-store.js';
+import { Upscaler } from './upscaler.js';
 
 const sourcePath = fileURLToPath(import.meta.url);
 const here = dirname(sourcePath);
@@ -15,31 +17,38 @@ interface StartOptions {
   root?: string;
   port?: number;
   host?: string;
+  upscalerBinary?: string;
+  basePath?: string;
 }
 
 export async function startServer({
   root = defaultRoot,
   port = Number(process.env.PORT ?? 4173),
-  host = process.env.HOST ?? '0.0.0.0'
+  host = process.env.HOST ?? '0.0.0.0',
+  upscalerBinary = process.env.UPSCALER_BIN,
+  basePath = process.env.APP_BASE_PATH
 }: StartOptions = {}): Promise<Server> {
+  const normalizedBasePath = normalizeAppBasePath(basePath);
+  const publicPath = appBaseUrl(normalizedBasePath);
   const clientDir = join(root, 'dist/client');
   if (!existsSync(join(clientDir, 'index.html'))) throw new Error('Built client not found. Run npm run build before npm start.');
   const store = await LibraryStore.open(join(root, 'library.json'));
-  const app = createApp({ store, clientDir });
+  const upscaler = upscalerBinary ? new Upscaler(upscalerBinary) : undefined;
+  const app = createApp({ store, clientDir, upscaler, basePath: normalizedBasePath });
+  if (upscalerBinary) console.log(`Spread upscaler:    ${upscalerBinary}`);
   const server = app.listen(port, host);
   await once(server, 'listening');
   const address = server.address();
   const boundPort = typeof address === 'object' && address ? address.port : port;
-  console.log(`Manga Reader local: http://127.0.0.1:${boundPort}`);
+  console.log(`Manga Reader local: http://127.0.0.1:${boundPort}${publicPath}`);
   if (host === '0.0.0.0' || host === '::') {
-    const lanAddresses = Object.values(networkInterfaces()).flatMap((entries) => entries ?? [])
-      .filter((entry) => entry.family === 'IPv4' && !entry.internal)
-      .map((entry) => entry.address);
+    const lanAddresses = Object.values(networkInterfaces()).flatMap((entries) =>
+      (entries ?? []).flatMap((entry) => entry.family === 'IPv4' && !entry.internal ? [entry.address] : []));
     for (const lanAddress of [...new Set(lanAddresses)]) {
-      console.log(`Manga Reader LAN:   http://${lanAddress}:${boundPort}`);
+      console.log(`Manga Reader LAN:   http://${lanAddress}:${boundPort}${publicPath}`);
     }
   } else if (host !== '127.0.0.1' && host !== 'localhost') {
-    console.log(`Manga Reader host:  http://${host}:${boundPort}`);
+    console.log(`Manga Reader host:  http://${host}:${boundPort}${publicPath}`);
   }
   return server;
 }

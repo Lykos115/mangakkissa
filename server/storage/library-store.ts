@@ -1,9 +1,9 @@
 import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
-import type { Library, LibrarySeries } from '../types.js';
+import type { Library, LibrarySeries } from '../../shared/contract.js';
 
 interface SeriesInput { key: string; title: string }
-interface ChapterInput { url: string; title: string; pageCount: number }
+interface ChapterInput { url: string; title: string; pageCount: number; firstPageUrl?: string }
 
 interface StoreFileSystem {
   mkdir: typeof mkdir;
@@ -58,9 +58,10 @@ export class LibraryStore {
       }
       const reread = series.chapters.some((entry) => entry.url === chapter.url);
       if (!reread) {
-        series.chapters.push({ ...chapter, firstOpenedAt: timestamp, completed: false });
+        series.chapters.push({ url: chapter.url, title: chapter.title, pageCount: chapter.pageCount, firstOpenedAt: timestamp, completed: false });
         series.resumeChapterUrl = chapter.url;
       }
+      if (!series.coverPageUrl && chapter.firstPageUrl) series.coverPageUrl = chapter.firstPageUrl;
       series.lastReadAt = timestamp;
       return { next, result: { series: structuredClone(series), reread } };
     });
@@ -87,6 +88,17 @@ export class LibraryStore {
       if (this.state.series[index].title === title) return { result: structuredClone(this.state.series[index]) };
       const next = structuredClone(this.state);
       next.series[index].title = title;
+      return { next, result: structuredClone(next.series[index]) };
+    });
+  }
+
+  async setCover(key: string, pageUrl: string): Promise<LibrarySeries | undefined> {
+    return this.mutate(() => {
+      const index = this.state.series.findIndex((entry) => entry.key === key);
+      if (index < 0) return { result: undefined };
+      if (this.state.series[index].coverPageUrl === pageUrl) return { result: structuredClone(this.state.series[index]) };
+      const next = structuredClone(this.state);
+      next.series[index].coverPageUrl = pageUrl;
       return { next, result: structuredClone(next.series[index]) };
     });
   }

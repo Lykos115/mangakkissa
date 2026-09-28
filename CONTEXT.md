@@ -21,6 +21,14 @@ _Avoid_: Image, scan
 What the reader displays at once: two Pages side by side read right-to-left, or one pre-joined landscape Page.
 _Avoid_: View, screen
 
+**ExtractionCache**:
+The server-side cache of Chapter extractions, keyed by Chapter URL; holds each Chapter's Pages and image-header policy, and evicts by Retention Window.
+_Avoid_: Chapter cache, extraction store
+
+**Retention Window**:
+The per-Series set of Chapter URLs kept in the ExtractionCache: the current Chapter plus its adjacent Chapters.
+_Avoid_: Cache window, GC window
+
 ### Library
 
 **Series**:

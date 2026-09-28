@@ -1,29 +1,8 @@
-import type { ReaderPage } from './spreads.js';
+import type { Library, LibrarySeries, OpenPayload } from '../../shared/contract.js';
+import { appUrl } from './app-url.js';
 
-export interface OpenPayload {
-  chapter: { url: string; title: string; pages: ReaderPage[]; nextUrl?: string; prevUrl?: string };
-  series: { key: string; title: string; resumeChapterUrl: string };
-  reread: boolean;
-}
+export type { Library, LibrarySeries, OpenPayload, VisitedChapter } from '../../shared/contract.js';
 
-export interface VisitedChapter {
-  url: string;
-  title: string;
-  pageCount: number;
-  firstOpenedAt: string;
-  completed: boolean;
-}
-
-export interface LibrarySeries {
-  key: string;
-  title: string;
-  resumeChapterUrl: string;
-  addedAt: string;
-  lastReadAt: string;
-  chapters: VisitedChapter[];
-}
-
-export interface Library { series: LibrarySeries[] }
 export interface OpenError extends Error { code?: string; status?: number; detail?: string }
 export interface ChapterNavigationOptions { skipLettered?: boolean }
 export interface ChapterPeekOptions extends ChapterNavigationOptions { retainAsCurrent?: boolean }
@@ -54,7 +33,7 @@ const jsonRequest = (method: string, body: unknown): RequestInit => ({
 });
 
 export async function openChapter(url: string, options: ChapterNavigationOptions = {}): Promise<OpenPayload> {
-  return requestJson('/api/chapter/open', jsonRequest('POST', {
+  return requestJson(appUrl('api/chapter/open'), jsonRequest('POST', {
     url,
     ...(options.skipLettered ? { skipLettered: true } : {})
   }));
@@ -64,21 +43,25 @@ export async function peekChapter(url: string, options: ChapterPeekOptions = {})
   const query = new URLSearchParams({ url });
   if (options.skipLettered) query.set('skipLettered', '1');
   if (options.retainAsCurrent) query.set('current', '1');
-  return requestJson(`/api/chapter/peek?${query}`);
+  return requestJson(`${appUrl('api/chapter/peek')}?${query}`);
 }
 
 export async function completeChapter(url: string): Promise<void> {
-  await request('/api/chapter/complete', jsonRequest('POST', { url }));
+  await request(appUrl('api/chapter/complete'), jsonRequest('POST', { url }));
 }
 
 export async function getLibrary(): Promise<Library> {
-  return requestJson('/api/library');
+  return requestJson(appUrl('api/library'));
 }
 
 export async function renameSeries(key: string, title: string): Promise<LibrarySeries> {
-  return requestJson(`/api/series/${encodeURIComponent(key)}`, jsonRequest('PATCH', { title }));
+  return requestJson(appUrl(`api/series/${encodeURIComponent(key)}`), jsonRequest('PATCH', { title }));
+}
+
+export async function setSeriesCover(key: string, coverUrl: string): Promise<LibrarySeries> {
+  return requestJson(appUrl(`api/series/${encodeURIComponent(key)}`), jsonRequest('PATCH', { coverUrl }));
 }
 
 export async function removeSeries(key: string): Promise<void> {
-  await request(`/api/series/${encodeURIComponent(key)}`, { method: 'DELETE' });
+  await request(appUrl(`api/series/${encodeURIComponent(key)}`), { method: 'DELETE' });
 }

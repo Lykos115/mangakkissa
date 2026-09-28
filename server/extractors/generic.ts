@@ -1,10 +1,9 @@
 import * as cheerio from 'cheerio';
 import type { Element } from 'domhandler';
+import { closeToWidth, isDoubledWidth } from '../../shared/contract.js';
 import { compareChapterDesignations, parseChapterDesignation, type ChapterDesignation } from '../chapter-designation.js';
 import type { ExtractError, Extractor, ExtractResult, Page } from '../types.js';
 
-const WIDTH_TOLERANCE = 0.15;
-const closeTo = (value: number, target: number) => Math.abs(value - target) / target <= WIDTH_TOLERANCE;
 const numberAttr = (value: string | undefined) => {
   if (!value) return undefined;
   const parsed = Number.parseInt(value, 10);
@@ -28,7 +27,7 @@ function longestRun(candidates: Candidate[], base: number | undefined): Candidat
   const flush = () => { if (current.length > winner.length) winner = current; current = []; };
   for (const candidate of candidates) {
     const adjacent = !current.length || candidate.index === current[current.length - 1].index + 1;
-    const widthFits = !base || !candidate.width || closeTo(candidate.width, base) || closeTo(candidate.width, base * 2);
+    const widthFits = !base || !candidate.width || closeToWidth(candidate.width, base) || isDoubledWidth(candidate.width, base);
     const shapeFits = candidate.width !== undefined || !current.length || current[current.length - 1].width !== undefined || candidate.shape === current[current.length - 1].shape;
     if (!adjacent || !widthFits || !shapeFits) flush();
     if (widthFits) current.push(candidate);

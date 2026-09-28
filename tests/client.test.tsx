@@ -7,7 +7,7 @@ import { App } from '../client/src/App.js';
 import { openChapter as requestOpenChapter, peekChapter as requestPeekChapter, type Library, type LibrarySeries } from '../client/src/api.js';
 import { buildSpreads } from '../client/src/spreads.js';
 
-afterEach(() => { cleanup(); vi.restoreAllMocks(); });
+afterEach(() => { cleanup(); vi.restoreAllMocks(); window.history.replaceState(null, '', '/'); });
 
 const payload = { chapter: { url: 'https://reader.test/c1', title: 'Chapter 1', pages: [
   { url: 'https://cdn.test/1.jpg', width: 800, height: 1200 },
@@ -25,14 +25,14 @@ const nextPayload = { chapter: { url: 'https://reader.test/c2', title: 'Chapter 
 
 const series: LibrarySeries = {
   key: 'reader.test', title: 'Ink House', resumeChapterUrl: 'https://reader.test/c2',
-  addedAt: '2026-07-12T09:00:00.000Z', lastReadAt: '2026-07-13T11:00:00.000Z', chapters: [
+  addedAt: '2026-07-12T09:00:00.000Z', lastReadAt: '2026-07-13T11:00:00.000Z', coverPageUrl: 'https://cdn.test/1.jpg', chapters: [
     { url: 'https://reader.test/c1', title: 'Chapter 1', pageCount: 5, firstOpenedAt: '2026-07-12T09:00:00.000Z', completed: true },
     { url: 'https://reader.test/c2', title: 'Chapter 2', pageCount: 4, firstOpenedAt: '2026-07-13T11:00:00.000Z', completed: false }
   ]
 };
 const olderSeries: LibrarySeries = {
   key: 'older.test', title: 'Older Tales', resumeChapterUrl: 'https://older.test/c4',
-  addedAt: '2026-07-10T09:00:00.000Z', lastReadAt: '2026-07-12T08:00:00.000Z', chapters: [
+  addedAt: '2026-07-10T09:00:00.000Z', lastReadAt: '2026-07-12T08:00:00.000Z', coverPageUrl: 'https://cdn.test/older.jpg', chapters: [
     { url: 'https://older.test/c4', title: 'Chapter 4', pageCount: 3, firstOpenedAt: '2026-07-12T08:00:00.000Z', completed: false }
   ]
 };
@@ -51,7 +51,7 @@ function deferred<T>() {
 async function submitChapter(openChapter: (url: string) => Promise<typeof payload>) {
   render(<App openChapter={openChapter} getLibrary={async () => emptyLibrary} />);
   await userEvent.type(screen.getByLabelText('Chapter URL'), payload.chapter.url);
-  await userEvent.click(screen.getByRole('button', { name: 'Open chapter' }));
+  await userEvent.click(screen.getByRole('button', { name: 'Open' }));
 }
 
 async function openReader() {
@@ -148,20 +148,20 @@ describe('client open flow', () => {
 });
 
 describe('Library management', () => {
-  it('lists Series in API order with Resume Chapter title, date, and expandable Visited Logs', async () => {
+  it('lists Series covers in API order and opens a Series screen with its Chapters', async () => {
     render(<App getLibrary={async () => ({ series: [series, olderSeries] })} />);
     const entries = await screen.findAllByRole('article');
     expect(entries.map((entry) => within(entry).getByRole('heading').textContent)).toEqual(['Ink House', 'Older Tales']);
-    expect(within(entries[0]).getByText('Chapter 2')).toBeInTheDocument();
-    expect(within(entries[0]).getByText('Last read', { exact: false }).closest('time')).toHaveAttribute('datetime', series.lastReadAt);
-    const toggle = within(entries[0]).getByRole('button', { name: 'Show Visited Log for Ink House' });
-    expect(toggle).toHaveAttribute('aria-expanded', 'false');
-    await userEvent.click(toggle);
-    expect(toggle).toHaveAttribute('aria-expanded', 'true');
-    expect(within(entries[0]).getByRole('button', { name: 'Re-read Chapter 1' })).toBeInTheDocument();
+    expect(within(entries[0]).getByRole('img', { name: 'Cover of Ink House' }))
+      .toHaveAttribute('src', `/api/image?url=${encodeURIComponent('https://cdn.test/1.jpg')}`);
+
+    await userEvent.click(within(entries[0]).getByRole('button', { name: 'Open Ink House' }));
+    expect(await screen.findByRole('heading', { name: 'Ink House' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Read Chapter 1' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Read Chapter 2' })).toBeInTheDocument();
   });
 
-  it('resumes and Re-reads through the normal open path', async () => {
+  it('resumes from the shelf and re-reads a Chapter from the Series screen', async () => {
     const openChapter = vi.fn(async (url: string) => ({ ...payload, chapter: { ...payload.chapter, url }, reread: url.endsWith('c1') }));
     render(<App getLibrary={async () => ({ series: [series] })} openChapter={openChapter} />);
     await userEvent.click(await screen.findByRole('button', { name: 'Resume Ink House' }));
@@ -169,8 +169,8 @@ describe('Library management', () => {
     expect(await screen.findByText('Spread 1 / 4')).toBeInTheDocument();
 
     await userEvent.click(screen.getByRole('button', { name: 'Library' }));
-    await userEvent.click(await screen.findByRole('button', { name: 'Show Visited Log for Ink House' }));
-    await userEvent.click(screen.getByRole('button', { name: 'Re-read Chapter 1' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Open Ink House' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Read Chapter 1' }));
     expect(openChapter).toHaveBeenLastCalledWith('https://reader.test/c1');
   });
 
@@ -188,18 +188,19 @@ describe('Library management', () => {
     expect(await screen.findByRole('heading', { name: 'Chapter 1' })).toBeInTheDocument();
   });
 
-  it('renames a Series and confirms before removing it with its Visited Log', async () => {
+  it('renames a Series on its screen and confirms before removing it with its Visited Log', async () => {
     const renamed = { ...series, title: 'The Ink House' };
     const renameSeries = vi.fn(async () => renamed);
     const removeSeries = vi.fn(async () => undefined);
     const confirm = vi.spyOn(window, 'confirm').mockReturnValueOnce(false).mockReturnValueOnce(true);
     render(<App getLibrary={async () => ({ series: [series] })} renameSeries={renameSeries} removeSeries={removeSeries} />);
 
-    await userEvent.click(await screen.findByRole('button', { name: 'Rename Ink House' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Open Ink House' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Rename Ink House' }));
     const input = screen.getByLabelText('Series title');
     await userEvent.clear(input);
     await userEvent.type(input, 'The Ink House');
-    await userEvent.click(screen.getByRole('button', { name: 'Save title' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
     expect(renameSeries).toHaveBeenCalledWith('reader.test', 'The Ink House');
     expect(await screen.findByRole('heading', { name: 'The Ink House' })).toBeInTheDocument();
 
@@ -211,6 +212,33 @@ describe('Library management', () => {
     expect(removeSeries).toHaveBeenCalledWith('reader.test');
     expect(screen.queryByRole('heading', { name: 'The Ink House' })).not.toBeInTheDocument();
   });
+
+  it('detects a cover from the first visited Chapter when the Series has none', async () => {
+    const { coverPageUrl: _omitted, ...uncoveredSeries } = series;
+    const peekChapter = vi.fn(async () => payload);
+    render(<App getLibrary={async () => ({ series: [uncoveredSeries] })} peekChapter={peekChapter} />);
+    expect(await screen.findByRole('img', { name: 'Cover of Ink House' }))
+      .toHaveAttribute('src', `/api/image?url=${encodeURIComponent('https://cdn.test/1.jpg')}`);
+    expect(peekChapter).toHaveBeenCalledWith('https://reader.test/c1');
+  });
+
+  it('saves a picked cover through the Series API', async () => {
+    const setSeriesCover = vi.fn(async () => ({ ...series, coverPageUrl: 'https://cdn.test/5.jpg' }));
+    const peekChapter = vi.fn(async (url: string) => url.endsWith('c2')
+      ? { ...payload, chapter: { ...payload.chapter, url, pages: [{ url: 'https://cdn.test/5.jpg' }] } }
+      : payload);
+    render(<App getLibrary={async () => ({ series: [series] })} peekChapter={peekChapter} setSeriesCover={setSeriesCover} />);
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Open Ink House' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Change cover for Ink House' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Choose a cover for Ink House' });
+    const candidates = await within(dialog).findAllByRole('button', { name: /Chapter/ });
+    expect(candidates).toHaveLength(2);
+    await userEvent.click(candidates[1]);
+    expect(setSeriesCover).toHaveBeenCalledWith('reader.test', 'https://cdn.test/5.jpg');
+    expect(await screen.findByRole('img', { name: 'Cover of Ink House' }))
+      .toHaveAttribute('src', `/api/image?url=${encodeURIComponent('https://cdn.test/5.jpg')}`);
+  });
 });
 
 describe('Adjacent Chapter flow', () => {
@@ -221,7 +249,7 @@ describe('Adjacent Chapter flow', () => {
     const completeChapter = vi.fn(async () => undefined);
     render(<App openChapter={openChapter} peekChapter={peekChapter} completeChapter={completeChapter} getLibrary={async () => emptyLibrary} />);
     await userEvent.type(screen.getByLabelText('Chapter URL'), first.chapter.url);
-    await userEvent.click(screen.getByRole('button', { name: 'Open chapter' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Open' }));
 
     const divider = await screen.findByLabelText('Next Chapter — Chapter 2');
     expect(divider).toBeInTheDocument();
@@ -263,7 +291,7 @@ describe('Adjacent Chapter flow', () => {
     });
     render(<App openChapter={openChapter} peekChapter={peekChapter} completeChapter={async () => undefined} getLibrary={async () => emptyLibrary} />);
     await userEvent.type(screen.getByLabelText('Chapter URL'), raw.chapter.url);
-    await userEvent.click(screen.getByRole('button', { name: 'Open chapter' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Open' }));
     await screen.findByRole('heading', { name: 'Chapter 42' });
     await waitFor(() => expect(peekChapter).toHaveBeenCalledWith(raw.chapter.nextUrl));
 
@@ -301,7 +329,7 @@ describe('Adjacent Chapter flow', () => {
     const peekChapter = vi.fn(async (url: string, options?: { retainAsCurrent?: boolean }) => options?.retainAsCurrent ? effective : nextPayload);
     render(<App openChapter={openChapter} peekChapter={peekChapter} completeChapter={async () => undefined} getLibrary={async () => emptyLibrary} />);
     await userEvent.type(screen.getByLabelText('Chapter URL'), current.chapter.url);
-    await userEvent.click(screen.getByRole('button', { name: 'Open chapter' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Open' }));
     const option = await screen.findByLabelText('Skip lettered Chapters');
     await userEvent.click(option);
     await waitFor(() => expect(option).toBeChecked());
@@ -324,7 +352,7 @@ describe('Adjacent Chapter flow', () => {
     });
     render(<App openChapter={async () => raw} peekChapter={peekChapter} completeChapter={async () => undefined} getLibrary={async () => emptyLibrary} />);
     await userEvent.type(screen.getByLabelText('Chapter URL'), raw.chapter.url);
-    await userEvent.click(screen.getByRole('button', { name: 'Open chapter' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Open' }));
     await screen.findByLabelText('Next Chapter — Chapter 2');
 
     const option = screen.getByLabelText('Skip lettered Chapters');
@@ -353,7 +381,7 @@ describe('Adjacent Chapter flow', () => {
     });
     render(<App openChapter={async () => raw} peekChapter={peekChapter} completeChapter={async () => undefined} getLibrary={async () => emptyLibrary} />);
     await userEvent.type(screen.getByLabelText('Chapter URL'), raw.chapter.url);
-    await userEvent.click(screen.getByRole('button', { name: 'Open chapter' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Open' }));
     const option = await screen.findByLabelText('Skip lettered Chapters');
 
     await userEvent.click(option);
@@ -364,7 +392,7 @@ describe('Adjacent Chapter flow', () => {
 
     await userEvent.click(screen.getByRole('button', { name: 'Library' }));
     await userEvent.type(screen.getByLabelText('Chapter URL'), raw.chapter.url);
-    await userEvent.click(screen.getByRole('button', { name: 'Open chapter' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Open' }));
     expect(await screen.findByLabelText('Skip lettered Chapters')).not.toBeChecked();
   });
 
@@ -374,7 +402,7 @@ describe('Adjacent Chapter flow', () => {
     const completeChapter = vi.fn(async () => undefined);
     render(<App openChapter={openChapter} peekChapter={async () => nextPayload} completeChapter={completeChapter} getLibrary={async () => emptyLibrary} />);
     await userEvent.type(screen.getByLabelText('Chapter URL'), first.chapter.url);
-    await userEvent.click(screen.getByRole('button', { name: 'Open chapter' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Open' }));
     await screen.findByLabelText('Next Chapter — Chapter 2');
     await userEvent.click(screen.getByRole('button', { name: 'Spread 4' }));
     expect(completeChapter).toHaveBeenCalledWith(first.chapter.url);
@@ -388,7 +416,7 @@ describe('Adjacent Chapter flow', () => {
     const openChapter = vi.fn(async (url: string) => url === previous.chapter.url ? previous : nextPayload);
     render(<App openChapter={openChapter} peekChapter={async () => { throw new Error('No next'); }} completeChapter={async () => undefined} getLibrary={async () => emptyLibrary} />);
     await userEvent.type(screen.getByLabelText('Chapter URL'), nextPayload.chapter.url);
-    await userEvent.click(screen.getByRole('button', { name: 'Open chapter' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Open' }));
     await userEvent.click(await screen.findByRole('button', { name: 'Previous spread' }));
     expect(openChapter).toHaveBeenLastCalledWith(previous.chapter.url);
     expect(await screen.findByRole('heading', { name: 'Chapter 1' })).toBeInTheDocument();
@@ -400,7 +428,7 @@ describe('Adjacent Chapter flow', () => {
     const completeChapter = vi.fn(async () => undefined);
     render(<App openChapter={async () => latest} completeChapter={completeChapter} getLibrary={async () => emptyLibrary} />);
     await userEvent.type(screen.getByLabelText('Chapter URL'), latest.chapter.url);
-    await userEvent.click(screen.getByRole('button', { name: 'Open chapter' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Open' }));
     await screen.findByRole('heading', { name: 'Latest Chapter' });
     expect(completeChapter).toHaveBeenCalledWith(latest.chapter.url);
   });
@@ -409,7 +437,7 @@ describe('Adjacent Chapter flow', () => {
     const openChapter = vi.fn(async (url: string) => url === nextPayload.chapter.url ? nextPayload : payload);
     render(<App openChapter={openChapter} getLibrary={async () => emptyLibrary} />);
     await userEvent.type(screen.getByLabelText('Chapter URL'), payload.chapter.url);
-    await userEvent.click(screen.getByRole('button', { name: 'Open chapter' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Open' }));
     await userEvent.click(await screen.findByRole('button', { name: 'Spread 4' }));
     await userEvent.click(screen.getByRole('button', { name: 'Next spread' }));
 
@@ -432,7 +460,7 @@ describe('Adjacent Chapter flow', () => {
       .mockResolvedValueOnce(nextPayload);
     render(<App openChapter={openChapter} peekChapter={vi.fn().mockRejectedValue(failure)} getLibrary={async () => emptyLibrary} />);
     await userEvent.type(screen.getByLabelText('Chapter URL'), first.chapter.url);
-    await userEvent.click(screen.getByRole('button', { name: 'Open chapter' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Open' }));
     await userEvent.click(await screen.findByRole('button', { name: 'Spread 4' }));
     await userEvent.click(screen.getByRole('button', { name: 'Next spread' }));
 
@@ -465,6 +493,78 @@ describe('Page failure handling', () => {
     expect(screen.getByRole('img', { name: 'Page 3 failed to load' })).toBeInTheDocument();
     fireEvent.load(retryingPage);
     expect(screen.queryByRole('img', { name: 'Page 3 failed to load' })).not.toBeInTheDocument();
+  });
+});
+
+describe('Spread upscaling', () => {
+  const deficientUrl = 'https://cdn.test/4.jpg';
+  const upscalePayload = {
+    ...payload,
+    upscaler: 'ready' as const,
+    chapter: { ...payload.chapter, pages: [
+      { url: 'https://cdn.test/1.jpg', width: 800, height: 1200 },
+      { url: 'https://cdn.test/2.jpg', width: 800, height: 1200 },
+      { url: 'https://cdn.test/3.jpg', width: 800, height: 1200 },
+      { url: deficientUrl, width: 800, height: 574 },
+      { url: 'https://cdn.test/5.jpg', width: 1600, height: 1200 }
+    ] }
+  };
+  const loaders = () => [...document.querySelectorAll('.upscale-loader')] as HTMLImageElement[];
+
+  it('never issues an upscale request when the server reports the upscaler unconfigured', async () => {
+    await submitChapter(async () => ({ ...upscalePayload, upscaler: 'unconfigured' as const }));
+    await screen.findByRole('heading', { name: 'Chapter 1' });
+    await userEvent.click(screen.getByRole('button', { name: 'Spread 3' }));
+    expect(document.querySelector('img[src*="upscale=2"]')).toBeNull();
+    expect(loaders()).toEqual([]);
+  });
+
+  it('requests upscales for deficient Spreads only and swaps the sharpened image in on load', async () => {
+    await submitChapter(async () => upscalePayload);
+    await screen.findByRole('heading', { name: 'Chapter 1' });
+    expect(loaders().map((image) => image.getAttribute('src'))).toEqual([
+      `/api/image?url=${encodeURIComponent(deficientUrl)}&upscale=2`
+    ]);
+
+    await userEvent.click(screen.getByRole('button', { name: 'Spread 3' }));
+    const original = within(screen.getByTestId('spread')).getByRole('img', { name: 'Page 4' });
+    expect(original.getAttribute('src')).not.toContain('upscale');
+
+    fireEvent.load(loaders()[0]);
+    const swapped = within(screen.getByTestId('spread')).getByRole('img', { name: 'Page 4' });
+    expect(swapped.getAttribute('src')).toContain('upscale=2');
+    expect(loaders()).toEqual([]);
+    const thumbnails = screen.getByRole('navigation', { name: 'Chapter Spreads' }).querySelectorAll('img');
+    expect([...thumbnails].every((image) => !image.getAttribute('src')?.includes('upscale'))).toBe(true);
+  });
+
+  it('fires the upscale when deficiency arrives by measurement', async () => {
+    const unmeasured = { ...upscalePayload, chapter: { ...upscalePayload.chapter, pages: upscalePayload.chapter.pages.map((page) => page.url === deficientUrl ? { url: deficientUrl } : page) } };
+    await submitChapter(async () => unmeasured);
+    await screen.findByRole('heading', { name: 'Chapter 1' });
+    expect(loaders()).toEqual([]);
+
+    await userEvent.click(screen.getByRole('button', { name: 'Spread 3' }));
+    const image = within(screen.getByTestId('spread')).getByRole('img', { name: 'Page 4' });
+    Object.defineProperty(image, 'naturalWidth', { value: 800 });
+    Object.defineProperty(image, 'naturalHeight', { value: 574 });
+    fireEvent.load(image);
+    expect(loaders().map((element) => element.getAttribute('src'))).toEqual([
+      `/api/image?url=${encodeURIComponent(deficientUrl)}&upscale=2`
+    ]);
+  });
+
+  it('keeps the original and warns once in the chrome when the upscaler breaks', async () => {
+    await submitChapter(async () => upscalePayload);
+    await screen.findByRole('heading', { name: 'Chapter 1' });
+    fireEvent.error(loaders()[0]);
+
+    expect(screen.getByRole('alert')).toHaveTextContent('Spread upscaling isn’t working — originals are shown.');
+    expect(loaders()).toEqual([]);
+    await userEvent.click(screen.getByRole('button', { name: 'Spread 3' }));
+    const original = within(screen.getByTestId('spread')).getByRole('img', { name: 'Page 4' });
+    expect(original.getAttribute('src')).toBe(`/api/image?url=${encodeURIComponent(deficientUrl)}`);
+    expect(screen.queryByRole('button', { name: /didn't load/ })).not.toBeInTheDocument();
   });
 });
 
