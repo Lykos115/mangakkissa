@@ -7,10 +7,14 @@
     "node": ">=20.19"
   },
   "knip": {
-    "entry": ["client/src/main.tsx"]
+    "entry": [
+      "client/src/main.tsx",
+      "client/lab/main.tsx"
+    ]
   },
   "scripts": {
     "dev": "tsx server/index.ts",
+    "dev:preview": "APP_BASE_PATH=/preview vite",
     "build": "vite build && tsc -p tsconfig.server.json",
     "start": "node dist/server/index.js",
     "test": "vitest run --root .",
