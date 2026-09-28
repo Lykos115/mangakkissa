@@ -53,6 +53,24 @@ const resumeTitle = (series: LibrarySeries) =>
 
 const lastRead = (series: LibrarySeries) => new Date(series.lastReadAt).toLocaleDateString();
 
+const greeting = (hour = new Date().getHours()) => {
+  if (hour < 5) return { kana: '夜更かし', text: 'Still up?' };
+  if (hour < 12) return { kana: 'おはよう', text: 'Good morning.' };
+  if (hour < 18) return { kana: 'こんにちは', text: 'Slow afternoon.' };
+  return { kana: 'こんばんは', text: 'Evening, reader.' };
+};
+
+// The chalkboard easel: the most recently read Series, written up by hand.
+function TodaysPick({ series, pending, onResume }: { series: LibrarySeries; pending: boolean; onResume: () => void }) {
+  return <aside className="todays-pick" aria-label="Today's pick">
+    <p className="todays-pick-kana" lang="ja">本日のおすすめ</p>
+    <p className="todays-pick-title">Today's pick</p>
+    <p className="todays-pick-name">{series.title}</p>
+    <p className="todays-pick-line">{resumeTitle(series)} ~ fresh, where you left off</p>
+    <button type="button" disabled={pending} onClick={onResume}>{pending ? 'Pouring…' : '♡ Pour me that one'}</button>
+  </aside>;
+}
+
 interface ShelfApi {
   getLibrary: typeof defaultGetLibrary;
   openChapter: typeof defaultOpenChapter;
@@ -155,7 +173,7 @@ function PasteBar({ openChapter, onOpened }: { openChapter: typeof defaultOpenCh
     }
   };
   return <form className="shelf-paste" onSubmit={(event) => { void submit(event); }}>
-    <input type="url" required value={url} aria-label="Chapter URL" placeholder="Paste a Chapter URL to add it to the shelf…"
+    <input type="url" required value={url} aria-label="Chapter URL" placeholder="Leave a Chapter URL on the counter…"
       onChange={(event) => setUrl(event.target.value)} />
     <button type="submit" disabled={pending}>{pending ? 'Opening…' : 'Open'}</button>
     {error && <ErrorMessage error={error} retry={() => { void submit(); }} />}
@@ -244,7 +262,7 @@ function SeriesScreen({ series, data, api, coverPageUrl, onBack }: {
   const openError = seriesErrors[series.key];
   return <>
     <header className="shelf-topbar">
-      <button type="button" className="quiet-button shelf-back" onClick={onBack}>← The Shelf</button>
+      <button type="button" className="quiet-button shelf-back" onClick={onBack}>← Your table</button>
     </header>
     <section className="shelf-hero">
       <div className="shelf-cover-wrap">
@@ -253,7 +271,7 @@ function SeriesScreen({ series, data, api, coverPageUrl, onBack }: {
           aria-label={`Change cover for ${series.title}`}>Change cover</button>
       </div>
       <div className="shelf-hero-copy">
-        <p className="eyebrow">On the shelf</p>
+        <p className="eyebrow">On your table</p>
         {editing?.key === series.key
           ? <form className="shelf-rename" onSubmit={(event) => { void saveTitle(event, series.key); }}>
               <input required value={editing.title} aria-label="Series title" autoFocus
@@ -319,10 +337,17 @@ export function LibraryShelf({
     return <SeriesScreen series={selected} data={data} api={api} coverPageUrl={coverOf(selected)} onBack={() => select(undefined)} />;
   }
 
+  const hello = greeting();
+  const pick = library.series[0];
   return <>
     <header className="shelf-topbar">
-      <h1><span className="eyebrow">Local manga reader</span>The Shelf</h1>
-      <PasteBar openChapter={openChapter} onOpened={onOpened} />
+      <div>
+        <h1><span className="eyebrow" lang="ja">{hello.kana}</span>{hello.text}</h1>
+        <p className="shelf-lede">Pull up a chair — your table is by the window.</p>
+        <PasteBar openChapter={openChapter} onOpened={onOpened} />
+      </div>
+      {!loading && !error && pick && <TodaysPick series={pick} pending={state.seriesPending === pick.key}
+        onResume={() => { void openFromLibrary(pick.key, pick.resumeChapterUrl); }} />}
     </header>
     {loading && <p className="library-status">Loading Library…</p>}
     {error && <ErrorMessage error={error} retry={() => { data.dispatch({ type: 'library-refresh-started' }); void refresh(); }} />}
