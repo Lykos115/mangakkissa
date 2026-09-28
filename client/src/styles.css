@@ -310,6 +310,7 @@ input { border-width: 2px; background: #fffdf5; }
 .end-actions a { color: var(--gold); }
 
 @media (max-width: 760px) {
+  .shelf-topbar { grid-template-columns: 1fr; }
   .shelf-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 2rem .9rem; }
   .booth-lamp { top: 1.2rem; right: 1.1rem; }
 }
