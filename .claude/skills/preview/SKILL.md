@@ -17,9 +17,27 @@ on port 4173 (base `/manga-reader`), so demos show the user's real Library.
 3. Start the preview in the background: `npm run dev:preview` (= `APP_BASE_PATH=/preview vite`).
 4. Verify: `curl -s -o /dev/null -w '%{http_code}' localhost:5173/preview/` → `200`, and `/preview/api/library` returns JSON.
 
+## Only port 5173 is reachable
+
+Caddy (in an LXC container) forwards **only :5173**. Never hand the user another port.
+To preview other branches side by side, run each in its own git worktree on a
+local-only port with a nested base path, and mount it under the 5173 server:
+
+```sh
+# in each worktree (node_modules can be a symlink to the main checkout's)
+APP_BASE_PATH=/preview/booth npx vite --port 5175
+# the 5173 server, in the main checkout
+APP_BASE_PATH=/preview PREVIEW_UPSTREAMS="booth=5175,morning=5176" npx vite
+```
+
+That serves `http://0.0.0.0:5173/preview/booth/`, including HMR and `/api` (the
+worktree's own proxy forwards to :4173). `PREVIEW_UPSTREAMS` lives in `vite.config.ts`.
+Restart the 5173 server whenever the upstream list changes.
+
 ## Routes
 
 - `/preview/` — the real app, live from `client/src`.
+- `/preview/<name>/` — another branch's worktree, mounted via `PREVIEW_UPSTREAMS`.
 - `/preview/lab/` — the **design lab** (`client/lab/`): standalone, dev-only concept pages. Vite never builds it into `dist`. Each concept is a hash tab (`/preview/lab/#kissaten`).
 
 ## Adding a demo
