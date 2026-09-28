@@ -25,6 +25,9 @@ img { display: block; }
 .lab-tab-kana { font-family: 'Shippori Mincho', serif; font-weight: 700; }
 .lab-meta { display: flex; align-items: center; gap: .9rem; font-size: .8rem; }
 .lab-meta a { color: inherit; opacity: .7; }
+.lab-live { display: flex; gap: .45rem; opacity: .85; }
+.lab-live a { font: 700 .95rem 'Shippori Mincho', serif; text-decoration: none; opacity: 1; }
+.lab-live a:hover { text-decoration: underline; }
 .lab-source { padding: .2rem .55rem; border-radius: 999px; border: 1px solid currentColor; opacity: .75; }
 .lab-source-live::before { content: '● '; color: #6fbf73; }
 .lab-mood { padding: 1rem clamp(1rem, 3vw, 2rem) 0; text-align: center; font-size: .75rem; letter-spacing: .2em; text-transform: uppercase; opacity: .5; }

@@ -427,6 +427,10 @@ function Lab() {
       </div>
       <div className="lab-meta">
         <span className={`lab-source lab-source-${source}`}>{source === 'live' ? 'your library' : source === 'sample' ? 'sample data' : 'loading…'}</span>
+        <span className="lab-live">live:{' '}
+          {concepts.filter((entry) => entry.id !== 'menu').map((entry) =>
+            <a key={entry.id} href={appUrl(`${entry.id}/`)}>{entry.kana}</a>)}
+        </span>
         <a href={appUrl('')}>current app ↗</a>
       </div>
     </nav>
