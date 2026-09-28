@@ -1,26 +1,32 @@
 :root {
-  color-scheme: dark;
+  color-scheme: light;
   font-family: var(--body-font);
   background: var(--bg);
   color: var(--ink);
-  --body-font: Inter, ui-sans-serif, system-ui, sans-serif;
-  --display-font: var(--display-font);
-  --bg: #0c0d10;
-  --scrim: var(--scrim);
-  --backdrop: var(--backdrop);
-  --on-accent: #18130b;
-  --input-line: #55514a;
-  --hover: #2e2f36;
-  --hover-line: #6a6254;
-  --cover-ink: #f5f2e9cc;
-  --surface: #17181c;
-  --surface-2: #24252b;
-  --ink: #f5f2e9;
-  --line: #38352f;
+  --body-font: 'Zen Maru Gothic', ui-rounded, system-ui, sans-serif;
+  --display-font: 'Zen Maru Gothic', ui-rounded, system-ui, sans-serif;
+  --kanji-font: 'Shippori Mincho', serif;
+  --bg: #e9dfc4;
+  --scrim: #22305ae0;
+  --backdrop: #1b2440b3;
+  --on-accent: #fff8ec;
+  --input-line: #b9a676;
+  --hover: #efe6cc;
+  --hover-line: #8d7b4f;
+  --cover-ink: #fff8ec;
+  --surface: #f7f0dc;
+  --surface-2: #efe6cc;
+  --ink: #2a2a28;
+  --line: #cdbb8c;
   --divider: var(--line);
-  --muted: #aaa8a1;
-  --gold: #e8b45a;
-  --paper: #f5f0e6;
+  --muted: #6b624e;
+  --gold: #c8412f;
+  --paper: #fbf6ea;
+  --indigo: #22305a;
+  --moss: #2f4a3a;
+  --brass: #e7c46a;
+  --wood: #7a5c3b;
+  --wood-dark: #5a4028;
 }
 * { box-sizing: border-box; }
 html, body, #root { min-width: 320px; min-height: 100%; }
@@ -31,7 +37,7 @@ button:disabled { cursor: not-allowed; opacity: .45; }
 button:focus-visible, input:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
 kbd { margin-left: .25rem; color: var(--muted); font: .72rem ui-monospace, monospace; }
 
-.library-shell { min-height: 100vh; padding: clamp(1rem, 4vw, 3rem); background: radial-gradient(circle at 20% 10%, #28231c, transparent 40%), var(--bg); }
+.library-shell { min-height: 100vh; padding: clamp(1rem, 4vw, 3rem); background: repeating-linear-gradient(90deg, #0000 0 2px, #b9a67614 2px 4px), linear-gradient(#0000 0 calc(100% - 1px), #b9a67640 0) 0 0 / 100% 5.5rem, var(--bg); }
 .library-content { width: min(72rem, 100%); margin: 0 auto; display: grid; gap: 2rem; }
 .eyebrow { margin: 0 0 .35rem; text-transform: uppercase; letter-spacing: .16em; color: var(--gold); font-size: .75rem; font-weight: 800; }
 form { margin-top: 2rem; }
@@ -203,4 +209,107 @@ input { min-width: 0; flex: 1; border: 1px solid var(--input-line); border-radiu
   .thumbnail img, .thumbnail-page-failure { height: 50px; }
   .thumbnail-page-failure { width: 34px; }
   .end-actions { align-items: stretch; flex-direction: column; }
+}
+
+/* ── Private Booth ──────────────────────────────────────────────
+   A manga kissa: tatami lobby under an indigo noren, a member's card,
+   and every Series behind its own numbered booth door. The reader is
+   the booth itself — wooden partitions, a desk edge, a quiet dark room. */
+button { border-radius: .5rem; box-shadow: 0 .22rem 0 #8e2a1d; }
+button:active:not(:disabled) { translate: 0 .15rem; box-shadow: 0 .07rem 0 #8e2a1d; }
+.quiet-button { border: 2px solid var(--line); background: var(--paper); color: var(--indigo); box-shadow: 0 .22rem 0 var(--line); }
+input { border-width: 2px; background: #fffdf5; }
+.eyebrow { color: var(--moss); }
+.eyebrow span { color: var(--gold); font-family: var(--kanji-font); letter-spacing: .05em; }
+.error { background: #f8e1dc; border-left-color: var(--gold); }
+.error p, .shelf-paste-error, .danger-button { color: #a3281a; }
+
+.noren { display: flex; justify-content: center; gap: .3rem; margin: calc(-1 * clamp(1rem, 4vw, 3rem)) 0 -.5rem; }
+.noren span { width: clamp(3.2rem, 11vw, 5rem); height: clamp(5.5rem, 16vw, 8rem); display: grid; place-items: center; padding-top: .8rem; border-radius: 0 0 .3rem .3rem; background: linear-gradient(90deg, #0003, #0000 20% 80%, #0002), var(--indigo); color: var(--paper); font: 800 clamp(1.6rem, 5.5vw, 2.6rem) var(--kanji-font); transform-origin: top center; box-shadow: 0 .8rem 1.2rem #22305a40; transition: rotate .5s ease; }
+.noren span:nth-child(odd) { rotate: -.6deg; }
+.noren span:nth-child(even) { rotate: .8deg; }
+.noren:hover span:nth-child(odd) { rotate: 3deg; }
+.noren:hover span:nth-child(even) { rotate: -2deg; }
+
+.shelf-topbar h1 { color: var(--indigo); font-weight: 900; }
+.shelf-topbar .eyebrow { letter-spacing: .18em; }
+.shelf-paste button { padding-inline: 1.4rem; }
+
+.member-card { position: relative; overflow: hidden; width: min(26rem, 100%); padding: 1.3rem 1.5rem; border-radius: 1rem; background: linear-gradient(135deg, var(--moss), #1d3326); color: var(--paper); box-shadow: 0 1rem 2rem #2f4a3a44; display: grid; gap: .9rem; }
+.member-card::before { content: '漫'; position: absolute; right: -.5rem; bottom: -2.8rem; font: 800 10rem var(--kanji-font); color: #ffffff0d; }
+.member-card::after { content: ''; position: absolute; top: 1.2rem; right: 1.4rem; width: 2.4rem; height: 1.8rem; border-radius: .3rem; background: linear-gradient(135deg, var(--brass), #b38b2e); }
+.member-brand { margin: 0; color: var(--brass); font-size: .7rem; font-weight: 700; letter-spacing: .25em; text-transform: uppercase; }
+.member-brand span { margin-left: .4rem; font-family: var(--kanji-font); letter-spacing: .1em; }
+.member-number { margin: 0; font: 700 1.5rem ui-monospace, monospace; letter-spacing: .15em; }
+.member-card dl { display: flex; flex-wrap: wrap; gap: 1.5rem; margin: 0; }
+.member-card dt { font-size: .62rem; letter-spacing: .12em; text-transform: uppercase; opacity: .7; }
+.member-card dd { margin: 0; font-weight: 700; }
+
+/* Booth doors. */
+.shelf-grid { grid-template-columns: repeat(auto-fill, minmax(11.5rem, 1fr)); gap: 2.2rem 1.4rem; padding-top: .8rem; }
+.shelf-card { position: relative; gap: .4rem; padding: .8rem .8rem 1rem; border-radius: .6rem .6rem .3rem .3rem; background: repeating-linear-gradient(90deg, #8b6a45 0 3px, var(--wood) 3px 5px); box-shadow: inset 0 0 0 .45rem var(--wood-dark), 0 .6rem 1.2rem #5a402855; transition: translate .2s ease; }
+.shelf-card:hover { translate: 0 -.3rem; }
+.booth-plate { position: absolute; z-index: 3; top: -.75rem; left: 50%; translate: -50% 0; padding: .15rem .7rem; border-radius: .3rem; background: var(--brass); color: #3a2b10; font: 800 .95rem ui-monospace, monospace; box-shadow: 0 .2rem .4rem #0004; }
+.booth-lamp { position: absolute; z-index: 3; top: 1.4rem; right: 1.3rem; padding: .15rem .5rem; border-radius: 999px; background: #111a; color: #fff; font-size: .68rem; font-weight: 700; pointer-events: none; }
+.booth-lamp::before { content: ''; display: inline-block; width: .5rem; height: .5rem; margin-right: .35rem; border-radius: 50%; }
+.booth-lamp.busy::before { background: #ffb347; box-shadow: 0 0 .4rem #ffb347; }
+.booth-lamp.free::before { background: #7fdc8a; box-shadow: 0 0 .4rem #7fdc8a; }
+.shelf-cover-button { padding: .45rem; border-radius: .2rem; background: var(--paper); box-shadow: none; }
+.shelf-cover-button:hover { box-shadow: none; }
+.shelf-cover-button .shelf-cover { border-radius: .1rem; }
+.shelf-progress { left: .45rem; bottom: .45rem; max-width: calc(100% - .9rem); background: var(--gold); }
+.shelf-overlay { inset: .45rem; background: #22305ae0; }
+.shelf-up-next { color: var(--brass); }
+.shelf-up-next strong { color: var(--paper); }
+.shelf-meta { padding: 0 .25rem; color: var(--paper); }
+.shelf-meta h2 { font-weight: 700; }
+.shelf-meta small { color: #f0dcb4; }
+.shelf-resume-button { background: var(--paper); color: var(--indigo); box-shadow: 0 .2rem 0 var(--wood-dark); }
+
+/* Series screen: the booth's own page. */
+.shelf-cover-wrap { padding: .8rem; border-radius: .6rem .6rem .3rem .3rem; background: repeating-linear-gradient(90deg, #8b6a45 0 3px, var(--wood) 3px 5px); box-shadow: inset 0 0 0 .5rem var(--wood-dark), 0 1rem 2rem #5a402866; }
+.shelf-cover-wrap .shelf-cover { box-shadow: none; border: .45rem solid var(--paper); }
+.shelf-edit-cover { top: 1.6rem; right: 1.6rem; background: #22305ae0; color: var(--paper); box-shadow: none; }
+.shelf-hero-copy h1 { color: var(--indigo); font-weight: 900; }
+.shelf-chapters-heading { color: var(--indigo); }
+.chapter-log button { border: 2px solid var(--line); background: var(--paper); box-shadow: none; }
+.chapter-log button:hover { background: #fffdf5; border-color: var(--gold); }
+.picker { border-radius: 1rem; border-width: 2px; }
+
+/* Inside the booth. */
+.reader-shell { --surface: #2b2622; --surface-2: #3a332c; --ink: #f7f0dc; --line: #5a4028; --muted: #d4c3a0; --paper: #fbf6ea; --hover-line: #b08a5c;
+  color: var(--ink); background: repeating-linear-gradient(90deg, #353431 0 1px, #2c2b29 1px 44px); }
+.reader-shell .quiet-button { border-color: #5a4028; background: #3a332c; color: var(--ink); box-shadow: 0 .2rem 0 #1a1410; }
+.reader-header { border-bottom: 0; background: linear-gradient(90deg, #0003, #0000 12% 88%, #0003), var(--indigo); box-shadow: 0 .4rem 1rem #0006; }
+.reader-title { color: var(--paper); }
+.reader-title strong { color: var(--brass); }
+.spread-count { color: #c9cde0; }
+.navigation-option-toggle { border-color: #ffffff33; background: #ffffff14; color: var(--paper); }
+.reader-stage::before, .reader-stage::after { content: ''; position: absolute; z-index: 4; top: 0; bottom: 0; width: clamp(1.25rem, 4vw, 3.5rem); pointer-events: none; background: linear-gradient(90deg, var(--wood-dark), var(--wood)); }
+.reader-stage::before { left: 0; box-shadow: .6rem 0 1.5rem #0008; }
+.reader-stage::after { right: 0; background: linear-gradient(270deg, var(--wood-dark), var(--wood)); box-shadow: -.6rem 0 1.5rem #0008; }
+.spread-scroller { padding-inline: clamp(1.25rem, 4vw, 3.5rem); }
+.spread img { box-shadow: 0 .8rem 1.4rem #000a; }
+.chapter-toast { border: 0; border-radius: .4rem; background: var(--brass); color: #3a2b10; }
+.filmstrip-shell { border-top: 0; background: linear-gradient(#b08a5c, #8a6a44); box-shadow: 0 -.3rem .8rem #0006; }
+.progress-track { background: #5a402888; }
+.progress-value { background: var(--gold); }
+.thumbnail { box-shadow: none; }
+.thumbnail.current { border-color: var(--gold); background: #0002; }
+.chapter-divider { border-left-color: #5a402888; color: #2a1d0f; }
+.chapter-divider span { color: #8e2a1d; }
+.chapter-divider strong { color: #2a1d0f; }
+
+/* End of chapter: the drink bar. */
+.end-card { border: 2px solid #cdbb8c; border-radius: 1rem; background: #f7f0dc; color: #2a2a28; text-align: center; }
+.end-card .eyebrow { color: var(--moss); }
+.end-card h2 { color: var(--indigo); }
+.end-card label { text-align: left; }
+.end-card input { color: #2a2a28; }
+.end-card .quiet-button { border-color: #cdbb8c; background: #fffdf5; color: var(--indigo); box-shadow: 0 .22rem 0 #cdbb8c; }
+.end-actions a { color: var(--gold); }
+
+@media (max-width: 760px) {
+  .shelf-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 2rem .9rem; }
+  .booth-lamp { top: 1.2rem; right: 1.1rem; }
 }
