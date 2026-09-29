@@ -1,4 +1,4 @@
-# Manga Reader
+# Mangakkissa
 
 A local, single-user web app: paste a manga chapter URL, read it as right-to-left two-page spreads, flow into the next chapter, and keep a library of series with resume positions. Glossary for the whole app (single context).
 

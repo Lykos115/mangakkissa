@@ -8,7 +8,7 @@ description: Show UI work and design demos on the shared preview at 0.0.0.0:5173
 The preview is the Vite dev server mounted under `/preview/`, reachable at
 `http://0.0.0.0:5173/preview/` on the LAN and at `https://nemiru.tail2e41a3.ts.net:5173/preview/`.
 It hot-reloads the client source and proxies `/preview/api/*` to the running app
-on port 4173 (base `/manga-reader`), so demos show the user's real Library.
+on port 4173 (base `/mangakkissa`), so demos show the user's real Library.
 
 ## Start it
 
