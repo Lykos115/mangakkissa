@@ -96,7 +96,7 @@ describe('Spread builder', () => {
 });
 
 describe('client Chapter request options', () => {
-  it('keeps skipping off by default and serializes enabled open and current-peek options', async () => {
+  it('serializes open and peek requests', async () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => new Response(JSON.stringify(payload), {
       status: 200,
       headers: { 'content-type': 'application/json' }
@@ -104,10 +104,8 @@ describe('client Chapter request options', () => {
 
     await requestOpenChapter(payload.chapter.url);
     expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toEqual({ url: payload.chapter.url });
-    await requestOpenChapter(payload.chapter.url, { skipLettered: true });
-    expect(JSON.parse(String(fetchMock.mock.calls[1][1]?.body))).toEqual({ url: payload.chapter.url, skipLettered: true });
-    await requestPeekChapter(payload.chapter.url, { skipLettered: true, retainAsCurrent: true });
-    expect(fetchMock.mock.calls[2][0]).toBe('/api/chapter/peek?url=https%3A%2F%2Freader.test%2Fc1&skipLettered=1&current=1');
+    await requestPeekChapter(payload.chapter.url);
+    expect(fetchMock.mock.calls[1][0]).toBe('/api/chapter/peek?url=https%3A%2F%2Freader.test%2Fc1');
   });
 });
 
@@ -268,132 +266,31 @@ describe('Adjacent Chapter flow', () => {
     await waitForElementToBeRemoved(() => screen.queryByRole('status'), { timeout: 2500 });
   });
 
-  it('refreshes effective navigation when skipping lettered Chapters without resetting reader state', async () => {
-    const raw = {
-      ...payload,
-      chapter: { ...payload.chapter, url: 'https://reader.test/chapter-42', title: 'Chapter 42', nextUrl: 'https://reader.test/chapter-42e', prevUrl: 'https://reader.test/chapter-41I' }
-    };
-    const effective = {
-      ...raw,
-      chapter: { ...raw.chapter, nextUrl: 'https://reader.test/chapter-43', prevUrl: 'https://reader.test/chapter-41' }
-    };
-    const effectiveNext = {
-      ...nextPayload,
-      chapter: { ...nextPayload.chapter, url: 'https://reader.test/chapter-43', title: 'Chapter 43', prevUrl: raw.chapter.url }
-    };
-    const oldImmediate = deferred<typeof nextPayload>();
-    const openChapter = vi.fn(async (url: string, options?: { skipLettered?: boolean }) => url === effectiveNext.chapter.url ? effectiveNext : raw);
-    const peekChapter = vi.fn((url: string, options?: { skipLettered?: boolean; retainAsCurrent?: boolean }) => {
-      if (url === raw.chapter.nextUrl) return oldImmediate.promise;
-      if (url === raw.chapter.url && options?.retainAsCurrent) return Promise.resolve(effective);
-      if (url === effectiveNext.chapter.url) return Promise.resolve(effectiveNext);
-      throw new Error(`Unexpected peek: ${url}`);
-    });
-    render(<App openChapter={openChapter} peekChapter={peekChapter} completeChapter={async () => undefined} getLibrary={async () => emptyLibrary} />);
-    await userEvent.type(screen.getByLabelText('Chapter URL'), raw.chapter.url);
+  it('jumps straight to the next Chapter from the header button', async () => {
+    const first = { ...payload, chapter: { ...payload.chapter, nextUrl: nextPayload.chapter.url } };
+    const openChapter = vi.fn(async (url: string) => url === nextPayload.chapter.url ? nextPayload : first);
+    render(<App openChapter={openChapter} peekChapter={async () => nextPayload} completeChapter={async () => undefined} getLibrary={async () => emptyLibrary} />);
+    await userEvent.type(screen.getByLabelText('Chapter URL'), first.chapter.url);
     await userEvent.click(screen.getByRole('button', { name: 'Open' }));
-    await screen.findByRole('heading', { name: 'Chapter 42' });
-    await waitFor(() => expect(peekChapter).toHaveBeenCalledWith(raw.chapter.nextUrl));
+    await screen.findByRole('heading', { name: 'Chapter 1' });
+    expect(screen.getByText('Spread 1 / 4')).toBeInTheDocument();
 
-    await userEvent.click(screen.getByRole('button', { name: 'Next spread' }));
-    await userEvent.keyboard('f');
-    await userEvent.keyboard('p');
-    const failedPage = within(screen.getByTestId('spread')).getByRole('img', { name: 'Page 3' });
-    fireEvent.error(failedPage);
-    expect(screen.getByText('Spread 2 / 4')).toBeInTheDocument();
-    expect(screen.getByTestId('reader-stage')).toHaveClass('fit-width');
-
-    const option = screen.getByLabelText('Skip lettered Chapters');
-    expect(option).not.toBeChecked();
-    await userEvent.click(option);
-    expect(peekChapter).toHaveBeenCalledWith(raw.chapter.url, { skipLettered: true, retainAsCurrent: true });
-    expect(await screen.findByLabelText('Next Chapter — Chapter 43')).toBeInTheDocument();
-    expect(option).toBeChecked();
-    expect(screen.getByText('Spread 2 / 4')).toBeInTheDocument();
-    expect(screen.getByTestId('reader-stage')).toHaveClass('fit-width');
-    expect(screen.getByRole('button', { name: "Page 3 didn't load — tap to retry" })).toBeInTheDocument();
-
-    oldImmediate.resolve(nextPayload);
-    await waitFor(() => expect(screen.queryByLabelText('Next Chapter — Chapter 2')).not.toBeInTheDocument());
-    await userEvent.click(screen.getByRole('button', { name: 'Spread 4' }));
-    await userEvent.click(screen.getByRole('button', { name: 'Next spread' }));
-    expect(openChapter).toHaveBeenLastCalledWith(effectiveNext.chapter.url, { skipLettered: true });
-    expect(await screen.findByRole('heading', { name: 'Chapter 43' })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: /Next chapter/ }));
+    expect(openChapter).toHaveBeenLastCalledWith(nextPayload.chapter.url);
+    expect(await screen.findByRole('heading', { name: 'Chapter 2' })).toBeInTheDocument();
+    expect(screen.getByText('Spread 1 / 2')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Next chapter/ })).toBeDisabled();
   });
 
-  it('uses the effective previous Chapter for backward boundary navigation', async () => {
-    const current = { ...nextPayload, chapter: { ...nextPayload.chapter, url: 'https://reader.test/chapter-43', title: 'Chapter 43', prevUrl: 'https://reader.test/chapter-42f' } };
-    const effective = { ...current, chapter: { ...current.chapter, prevUrl: 'https://reader.test/chapter-42' } };
-    const previous = { ...payload, chapter: { ...payload.chapter, url: effective.chapter.prevUrl!, title: 'Chapter 42' } };
-    const openChapter = vi.fn(async (url: string) => url === previous.chapter.url ? previous : current);
-    const peekChapter = vi.fn(async (url: string, options?: { retainAsCurrent?: boolean }) => options?.retainAsCurrent ? effective : nextPayload);
-    render(<App openChapter={openChapter} peekChapter={peekChapter} completeChapter={async () => undefined} getLibrary={async () => emptyLibrary} />);
-    await userEvent.type(screen.getByLabelText('Chapter URL'), current.chapter.url);
+  it('jumps to the next Chapter with the n key', async () => {
+    const first = { ...payload, chapter: { ...payload.chapter, nextUrl: nextPayload.chapter.url } };
+    const openChapter = vi.fn(async (url: string) => url === nextPayload.chapter.url ? nextPayload : first);
+    render(<App openChapter={openChapter} peekChapter={async () => nextPayload} completeChapter={async () => undefined} getLibrary={async () => emptyLibrary} />);
+    await userEvent.type(screen.getByLabelText('Chapter URL'), first.chapter.url);
     await userEvent.click(screen.getByRole('button', { name: 'Open' }));
-    const option = await screen.findByLabelText('Skip lettered Chapters');
-    await userEvent.click(option);
-    await waitFor(() => expect(option).toBeChecked());
-    await userEvent.click(screen.getByRole('button', { name: 'Previous spread' }));
-    expect(openChapter).toHaveBeenLastCalledWith(previous.chapter.url, { skipLettered: true });
-    expect(await screen.findByRole('heading', { name: 'Chapter 42' })).toBeInTheDocument();
-  });
-
-  it('disables boundary navigation during refresh and retries a failed toggle without changing current links', async () => {
-    const raw = { ...payload, chapter: { ...payload.chapter, nextUrl: nextPayload.chapter.url, prevUrl: 'https://reader.test/c0' } };
-    const refresh = deferred<typeof raw>();
-    const failure = Object.assign(new Error('temporary'), { code: 'FETCH_FAILED', status: 503, detail: 'temporary' });
-    let refreshAttempts = 0;
-    const peekChapter = vi.fn((chapterUrl: string, options?: { skipLettered?: boolean; retainAsCurrent?: boolean }) => {
-      if (!options?.retainAsCurrent) return Promise.resolve({ ...nextPayload, chapter: { ...nextPayload.chapter, url: chapterUrl } });
-      refreshAttempts += 1;
-      if (refreshAttempts === 1) return refresh.promise;
-      if (refreshAttempts === 2) return Promise.reject(failure);
-      return Promise.resolve({ ...raw, chapter: { ...raw.chapter, nextUrl: undefined } });
-    });
-    render(<App openChapter={async () => raw} peekChapter={peekChapter} completeChapter={async () => undefined} getLibrary={async () => emptyLibrary} />);
-    await userEvent.type(screen.getByLabelText('Chapter URL'), raw.chapter.url);
-    await userEvent.click(screen.getByRole('button', { name: 'Open' }));
-    await screen.findByLabelText('Next Chapter — Chapter 2');
-
-    const option = screen.getByLabelText('Skip lettered Chapters');
-    await userEvent.click(option);
-    expect(screen.getByRole('button', { name: 'Next spread' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: 'Previous spread' })).toBeDisabled();
-    refresh.reject(failure);
-    expect(await screen.findByText('Couldn’t refresh Chapter navigation.')).toBeInTheDocument();
-    expect(option).not.toBeChecked();
-    expect(screen.getByLabelText('Next Chapter — Chapter 2')).toBeInTheDocument();
-
-    await userEvent.click(screen.getByRole('button', { name: 'Retry' }));
-    expect(await screen.findByText('Couldn’t refresh Chapter navigation.')).toBeInTheDocument();
-    expect(option).not.toBeChecked();
-    await userEvent.click(screen.getByRole('button', { name: 'Retry' }));
-    await waitFor(() => expect(option).toBeChecked());
-    expect(peekChapter).toHaveBeenLastCalledWith(raw.chapter.url, { skipLettered: true, retainAsCurrent: true });
-  });
-
-  it('turns skipping back off through a side-effect-free current refresh and resets it for a new reader session', async () => {
-    const raw = { ...payload, chapter: { ...payload.chapter, nextUrl: 'https://reader.test/chapter-42e' } };
-    const effective = { ...raw, chapter: { ...raw.chapter, nextUrl: nextPayload.chapter.url } };
-    const peekChapter = vi.fn(async (url: string, options?: { skipLettered?: boolean; retainAsCurrent?: boolean }) => {
-      if (url === raw.chapter.url && options?.retainAsCurrent) return options.skipLettered ? effective : raw;
-      return nextPayload;
-    });
-    render(<App openChapter={async () => raw} peekChapter={peekChapter} completeChapter={async () => undefined} getLibrary={async () => emptyLibrary} />);
-    await userEvent.type(screen.getByLabelText('Chapter URL'), raw.chapter.url);
-    await userEvent.click(screen.getByRole('button', { name: 'Open' }));
-    const option = await screen.findByLabelText('Skip lettered Chapters');
-
-    await userEvent.click(option);
-    await waitFor(() => expect(option).toBeChecked());
-    await userEvent.click(option);
-    await waitFor(() => expect(option).not.toBeChecked());
-    expect(peekChapter).toHaveBeenCalledWith(raw.chapter.url, { retainAsCurrent: true });
-
-    await userEvent.click(screen.getByRole('button', { name: 'Library' }));
-    await userEvent.type(screen.getByLabelText('Chapter URL'), raw.chapter.url);
-    await userEvent.click(screen.getByRole('button', { name: 'Open' }));
-    expect(await screen.findByLabelText('Skip lettered Chapters')).not.toBeChecked();
+    await screen.findByRole('heading', { name: 'Chapter 1' });
+    await userEvent.keyboard('n');
+    expect(await screen.findByRole('heading', { name: 'Chapter 2' })).toBeInTheDocument();
   });
 
   it('completes the last Spread and advances across the boundary through the normal open path', async () => {
