@@ -345,7 +345,7 @@ export function LibraryShelf({
   return <>
     <div className="noren" aria-hidden="true">{['漫', '画', '喫', '茶'].map((glyph) => <span key={glyph}>{glyph}</span>)}</div>
     <header className="shelf-topbar">
-      <h1><span className="eyebrow">Manga kissa · open 24h · quiet floor</span>The Lobby</h1>
+      <h1><span className="eyebrow">Mangakkissa · open 24h · quiet floor</span>The Lobby</h1>
       <PasteBar openChapter={openChapter} onOpened={onOpened} />
     </header>
     {!loading && !error && library.series.length > 0 && <MemberCard series={library.series} />}

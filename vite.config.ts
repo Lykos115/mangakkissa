@@ -33,7 +33,7 @@ export default defineConfig({
   base,
   plugins: [react(), upstreamSlashRedirect],
   // Dev server shared at https://nemiru.tail2e41a3.ts.net:5173/preview/ — API
-  // calls forward to the already-running app instance (default /manga-reader base).
+  // calls forward to the already-running app instance (default /mangakkissa base).
   server: {
     host: true,
     port: 5173,

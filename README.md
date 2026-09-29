@@ -1,4 +1,4 @@
-# Manga Reader
+# Mangakkissa
 
 A local, single-user manga reader. Paste a Chapter URL, read right-to-left Page Spreads, continue into adjacent Chapters, and resume Series from a persistent local Library.
 
@@ -44,8 +44,8 @@ npm start
 The process binds to all local network interfaces and prints both the local URL and each detected LAN URL, for example:
 
 ```text
-Manga Reader local: http://127.0.0.1:4173/manga-reader/
-Manga Reader LAN:   http://192.168.1.50:4173/manga-reader/
+Mangakkissa local: http://127.0.0.1:4173/mangakkissa/
+Mangakkissa LAN:   http://192.168.1.50:4173/mangakkissa/
 ```
 
 Open the LAN URL from another device connected to the same network. If it cannot connect, allow TCP port `4173` through the computer's firewall. To use another port:
@@ -60,23 +60,23 @@ To restrict the app to this computer again, set `HOST=127.0.0.1`:
 HOST=127.0.0.1 npm start
 ```
 
-## Reverse proxy under `/manga-reader`
+## Reverse proxy under `/mangakkissa`
 
-The production build and server default to `/manga-reader/`, so a reverse proxy can preserve that prefix instead of rewriting it. Build and run the backend on loopback:
+The production build and server default to `/mangakkissa/`, so a reverse proxy can preserve that prefix instead of rewriting it. Build and run the backend on loopback:
 
 ```sh
 npm run build
 HOST=127.0.0.1 npm start
 ```
 
-For Nginx, proxy the prefix without a URI suffix so the upstream receives the original `/manga-reader/...` path:
+For Nginx, proxy the prefix without a URI suffix so the upstream receives the original `/mangakkissa/...` path:
 
 ```nginx
-location = /manga-reader {
-    return 308 /manga-reader/;
+location = /mangakkissa {
+    return 308 /mangakkissa/;
 }
 
-location /manga-reader/ {
+location /mangakkissa/ {
     proxy_pass http://127.0.0.1:4173;
     proxy_set_header Host $host;
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -85,7 +85,19 @@ location /manga-reader/ {
 }
 ```
 
-This exposes the reader at `https://example.com/manga-reader/`. Query strings must be preserved because Chapter navigation and image requests carry their source URLs in query parameters. No WebSocket forwarding is required.
+For Caddy, `handle` (not `handle_path`) keeps the prefix. The optional last block sends old `/manga-reader/` links to the new path:
+
+```caddy
+redir /mangakkissa /mangakkissa/ 308
+handle /mangakkissa/* {
+    reverse_proxy 127.0.0.1:4173
+}
+handle_path /manga-reader/* {
+    redir * /mangakkissa{uri} 308
+}
+```
+
+This exposes the reader at `https://example.com/mangakkissa/`. Query strings must be preserved because Chapter navigation and image requests carry their source URLs in query parameters. No WebSocket forwarding is required.
 
 To use a different mount, provide the same `APP_BASE_PATH` while building and starting because Vite embeds it in the browser bundle:
 

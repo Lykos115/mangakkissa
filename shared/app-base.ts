@@ -1,4 +1,4 @@
-export const DEFAULT_APP_BASE_PATH = '/manga-reader';
+export const DEFAULT_APP_BASE_PATH = '/mangakkissa';
 
 export function normalizeAppBasePath(value: string | undefined, fallback = DEFAULT_APP_BASE_PATH): string {
   const candidate = (value ?? fallback).trim();
