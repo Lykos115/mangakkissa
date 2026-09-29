@@ -8,16 +8,24 @@ const page = (n: number, attrs = '') => `<img ${attrs} data-src="/pages/chapter-
 
 describe('Chapter designation', () => {
   it('parses final number-plus-letter designations with normalized suffixes and source precedence', () => {
-    expect(parseChapterDesignation('/series/chapter-42e/')).toEqual({ number: 42, suffix: 'e' });
-    expect(parseChapterDesignation('Chapter 41I')).toEqual({ number: 41, suffix: 'i' });
-    expect(parseChapterDesignation('Chapter 42')).toEqual({ number: 42, suffix: '' });
-    expect(parseChapterDesignation('/series-2/chapter-42f/', 'Chapter 99')).toEqual({ number: 42, suffix: 'f' });
-    expect(parseChapterDesignation('volume-2-chapter-17-extra-19A')).toEqual({ number: 19, suffix: 'a' });
+    expect(parseChapterDesignation('/series/chapter-42e/')).toEqual({ number: 42, part: 0, suffix: 'e' });
+    expect(parseChapterDesignation('Chapter 41I')).toEqual({ number: 41, part: 0, suffix: 'i' });
+    expect(parseChapterDesignation('Chapter 42')).toEqual({ number: 42, part: 0, suffix: '' });
+    expect(parseChapterDesignation('/series-2/chapter-42f/', 'Chapter 99')).toEqual({ number: 42, part: 0, suffix: 'f' });
+    expect(parseChapterDesignation('volume-2-chapter-17-extra-19A')).toEqual({ number: 19, part: 0, suffix: 'a' });
   });
 
-  it('orders unsuffixed Chapters before lettered variants', () => {
-    expect(compareChapterDesignations({ number: 42, suffix: '' }, { number: 42, suffix: 'e' })).toBeLessThan(0);
-    expect(compareChapterDesignations({ number: 42, suffix: 'f' }, { number: 43, suffix: '' })).toBeLessThan(0);
+  it('parses decimal Chapters from titles and from dashed slugs after the chapter word', () => {
+    expect(parseChapterDesignation('Horimiya, Chapter 6.5')).toEqual({ number: 6, part: 5, suffix: '' });
+    expect(parseChapterDesignation('/comic/horimiya-chapter-6-5/')).toEqual({ number: 6, part: 5, suffix: '' });
+    expect(parseChapterDesignation('/comic/horimiya-chapter-6/')).toEqual({ number: 6, part: 0, suffix: '' });
+  });
+
+  it('orders whole Chapters before their lettered and decimal variants', () => {
+    expect(compareChapterDesignations({ number: 42, part: 0, suffix: '' }, { number: 42, part: 0, suffix: 'e' })).toBeLessThan(0);
+    expect(compareChapterDesignations({ number: 42, part: 0, suffix: 'f' }, { number: 43, part: 0, suffix: '' })).toBeLessThan(0);
+    expect(compareChapterDesignations({ number: 6, part: 0, suffix: '' }, { number: 6, part: 5, suffix: '' })).toBeLessThan(0);
+    expect(compareChapterDesignations({ number: 6, part: 5, suffix: '' }, { number: 7, part: 0, suffix: '' })).toBeLessThan(0);
   });
 });
 
@@ -66,6 +74,18 @@ describe('Generic Extractor', () => {
     expect(genericExtractor.extract(html, 'https://reader.test/chapter-40/')).toMatchObject({
       prevUrl: 'https://reader.test/chapter-39/',
       nextUrl: 'https://reader.test/chapter-40f/'
+    });
+  });
+
+  it('finds prev/next chapter-link classes and orders a dashed decimal slug after its whole Chapter', () => {
+    const html = `<main><h1>Horimiya, Chapter 6</h1>
+      ${page(1)}${page(2)}${page(3)}
+      <a aria-label="Horimiya, Chapter 5" href="/comic/horimiya-chapter-5/" class="prev-chapter-link">Prev</a>
+      <a aria-label="Horimiya, Chapter 6.5" href="/comic/horimiya-chapter-6-5/" class="next-chapter-link">Next</a>
+    </main>`;
+    expect(genericExtractor.extract(html, 'https://reader.test/comic/horimiya-chapter-6/')).toMatchObject({
+      prevUrl: 'https://reader.test/comic/horimiya-chapter-5/',
+      nextUrl: 'https://reader.test/comic/horimiya-chapter-6-5/'
     });
   });
 
