@@ -61,12 +61,13 @@ function adjacentChapterUrls($: cheerio.CheerioAPI, chapterUrl: string, chapterT
     const rel = anchor.attr('rel')?.toLowerCase().split(/\s+/) ?? [];
     const text = anchor.text().trim();
     const inPostNavigation = anchor.closest('.post-navigation, [class*="post-navigation"]').length > 0;
-    if (!rel.includes('prev') && !rel.includes('next') && !inPostNavigation && !/next|prev(ious)? chapter/i.test(text)) return;
+    const navigationClass = /\b(next|prev(ious)?)[-_]chapter\b|\bchapter[-_](next|prev(ious)?)\b/i.test(anchor.attr('class') ?? '');
+    if (!rel.includes('prev') && !rel.includes('next') && !inPostNavigation && !navigationClass && !/^(next|prev(ious)?)\b|(next|prev(ious)?) chapter/i.test(text)) return;
     const href = anchor.attr('href');
     if (!href) return;
     try {
       const resolved = new URL(href, chapterUrl);
-      const parsed = parseChapterDesignation(resolved.pathname, anchor.attr('title'), text);
+      const parsed = parseChapterDesignation(resolved.pathname, anchor.attr('title'), anchor.attr('aria-label'), text);
       if (parsed && resolved.href !== chapterUrl) candidates.set(resolved.href, parsed);
     } catch { /* malformed adjacent URL is not a candidate */ }
   });

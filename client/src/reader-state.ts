@@ -11,7 +11,6 @@ export const defaultFit: FitMode = 'height';
 
 export interface PageLoadState { generation: number; failed: boolean; recovering: boolean }
 export interface PageSize { width: number; height: number }
-export interface NavigationRefreshFailure { error: OpenError; requestedValue: boolean }
 
 export interface ReaderState {
   opened?: OpenPayload;
@@ -24,9 +23,6 @@ export interface ReaderState {
   continuationPending: boolean;
   continuationError?: OpenError;
   pageLoads: Record<string, PageLoadState>;
-  skipLetteredChapters: boolean;
-  navigationRefreshPending: boolean;
-  navigationRefreshError?: NavigationRefreshFailure;
   coverSolo: boolean;
   fit: FitMode;
   chromeVisible: boolean;
@@ -40,8 +36,6 @@ export const initialReaderState: ReaderState = {
   continuationUrl: '',
   continuationPending: false,
   pageLoads: {},
-  skipLetteredChapters: false,
-  navigationRefreshPending: false,
   coverSolo: true,
   fit: defaultFit,
   chromeVisible: true,
@@ -67,10 +61,6 @@ export type ReaderAction =
   | { type: 'next-peek-started' }
   | { type: 'next-chapter-loaded'; chapter: OpenPayload['chapter'] }
   | { type: 'next-peek-failed'; error: OpenError }
-  | { type: 'navigation-refresh-started' }
-  | { type: 'navigation-refreshed'; chapterUrl: string; chapter: OpenPayload['chapter']; requestedValue: boolean }
-  | { type: 'navigation-refresh-failed'; chapterUrl: string; failure: NavigationRefreshFailure }
-  | { type: 'navigation-refresh-finished' }
   | { type: 'continuation-url-changed'; value: string }
   | { type: 'continuation-started' }
   | { type: 'continuation-succeeded'; payload: OpenPayload }
@@ -84,7 +74,7 @@ export function readerReducer(state: ReaderState, action: ReaderAction): ReaderS
     case 'session-started':
       return { ...initialReaderState, opened: action.payload };
     case 'session-ended':
-      return { ...state, opened: undefined, navigationRefreshPending: false, navigationRefreshError: undefined };
+      return { ...state, opened: undefined };
     case 'transition-started':
       return { ...state, transitionPending: true };
     case 'transition-finished':
@@ -95,7 +85,6 @@ export function readerReducer(state: ReaderState, action: ReaderAction): ReaderS
         opened: action.payload,
         nextChapter: undefined,
         nextError: undefined,
-        navigationRefreshError: undefined,
         atEnd: false,
         spreadIndex: action.spreadIndex,
         continuationUrl: '',
@@ -138,23 +127,6 @@ export function readerReducer(state: ReaderState, action: ReaderAction): ReaderS
       return { ...state, nextChapter: action.chapter };
     case 'next-peek-failed':
       return { ...state, nextError: action.error };
-    case 'navigation-refresh-started':
-      return { ...state, navigationRefreshPending: true, navigationRefreshError: undefined };
-    case 'navigation-refreshed': {
-      if (state.opened?.chapter.url !== action.chapterUrl) return state;
-      return {
-        ...state,
-        opened: { ...state.opened, chapter: action.chapter },
-        skipLetteredChapters: action.requestedValue,
-        nextChapter: undefined,
-        nextError: undefined
-      };
-    }
-    case 'navigation-refresh-failed':
-      if (state.opened?.chapter.url !== action.chapterUrl) return state;
-      return { ...state, navigationRefreshError: action.failure };
-    case 'navigation-refresh-finished':
-      return { ...state, navigationRefreshPending: false };
     case 'continuation-url-changed':
       return { ...state, continuationUrl: action.value };
     case 'continuation-started':
@@ -165,7 +137,6 @@ export function readerReducer(state: ReaderState, action: ReaderAction): ReaderS
         opened: action.payload,
         nextChapter: undefined,
         nextError: undefined,
-        navigationRefreshError: undefined,
         spreadIndex: 0,
         atEnd: false,
         continuationUrl: '',

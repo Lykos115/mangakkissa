@@ -72,20 +72,6 @@ describe('ExtractionCache', () => {
     expect(cache.headersFor('https://img.example/lone.jpg')).toEqual({});
   });
 
-  it('resolves the skip-lettered hop-walk through the cache, not the fetcher', async () => {
-    const { fetcher, cache } = harness({
-      'chapter-1': { nextUrl: 'https://series.example/chapter-1a' },
-      'chapter-1a': { nextUrl: 'https://series.example/chapter-2' },
-      'chapter-2': {}
-    });
-    await cache.resolve(chapterUrl('chapter-1a'));
-    fetcher.mockClear();
-    const resolved = await cache.resolve(chapterUrl('chapter-1'), true);
-    expect(resolved.navigation.nextUrl).toBe('https://series.example/chapter-2');
-    // chapter-1 itself fetches once; the lettered hop reuses the cached chapter-1a.
-    expect(fetcher.mock.calls.map(([url]) => url)).toEqual(['https://series.example/chapter-1']);
-  });
-
   it('prefetch warms the cache and swallows failures', async () => {
     const { fetcher, cache } = harness({ 'ch-2': {} });
     cache.prefetch('https://series.example/ch-2');

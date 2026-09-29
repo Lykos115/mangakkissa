@@ -1,5 +1,5 @@
 import { friendlyDetail } from './errors.js';
-import { normalizeChapterUrl, resolveAdjacentChapterUrls, type ResolvedChapterNavigation } from './chapter-navigation.js';
+import { adjacentChapterUrls, normalizeChapterUrl, type ResolvedChapterNavigation } from './chapter-navigation.js';
 import type { ExtractorRegistry } from './extractors/registry.js';
 import type { ExtractError, ExtractResult, Fetcher } from './types.js';
 
@@ -25,13 +25,6 @@ export class ExtractionFailure extends Error {
   }
 }
 
-const navigationSource = (chapter: ChapterExtraction) => ({
-  url: chapter.url,
-  chapterTitle: chapter.chapterTitle,
-  nextUrl: chapter.extracted.nextUrl,
-  prevUrl: chapter.extracted.prevUrl
-});
-
 export class ExtractionCache {
   private readonly extractions = new Map<string, Promise<ChapterExtraction>>();
   private readonly retentionWindows = new Map<string, Set<string>>();
@@ -40,15 +33,11 @@ export class ExtractionCache {
 
   constructor(private readonly fetcher: Fetcher, private readonly registry: ExtractorRegistry) {}
 
-  async resolve(chapterUrl: URL, skipLettered = false): Promise<ResolvedChapter> {
+  async resolve(chapterUrl: URL): Promise<ResolvedChapter> {
     const chapter = await this.extract(chapterUrl);
     return {
       chapter,
-      navigation: await resolveAdjacentChapterUrls(
-        navigationSource(chapter),
-        async (url) => navigationSource(await this.extract(url)),
-        skipLettered
-      )
+      navigation: adjacentChapterUrls({ url: chapter.url, nextUrl: chapter.extracted.nextUrl, prevUrl: chapter.extracted.prevUrl })
     };
   }
 

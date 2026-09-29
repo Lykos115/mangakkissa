@@ -19,7 +19,6 @@ import {
   initialReaderState,
   readerReducer,
   type FitMode,
-  type NavigationRefreshFailure,
   type PageLoadState,
   type PageSize
 } from './reader-state.js';
@@ -75,47 +74,28 @@ function PageMedia({ page, pageNumber, state, thumbnail = false, loading, upscal
   </span>;
 }
 
-function ReaderHeader({ seriesTitle, chapterTitle, spreadLabel, upscalerBroken, fit, coverSolo, skipLetteredChapters, toggleDisabled, navigationRefreshPending, navigationRefreshError, onLeave, onCycleFit, onTogglePairing, onSkipChange, onRetryRefresh }: {
+function ReaderHeader({ seriesTitle, chapterTitle, spreadLabel, upscalerBroken, fit, coverSolo, nextChapterDisabled, onLeave, onNextChapter, onCycleFit, onTogglePairing }: {
   seriesTitle: string;
   chapterTitle: string;
   spreadLabel: string;
   upscalerBroken: boolean;
   fit: FitMode;
   coverSolo: boolean;
-  skipLetteredChapters: boolean;
-  toggleDisabled: boolean;
-  navigationRefreshPending: boolean;
-  navigationRefreshError?: NavigationRefreshFailure;
+  nextChapterDisabled: boolean;
   onLeave: () => void;
+  onNextChapter: () => void;
   onCycleFit: () => void;
   onTogglePairing: () => void;
-  onSkipChange: (requestedValue: boolean) => void;
-  onRetryRefresh: (requestedValue: boolean) => void;
 }) {
   return <header className="reader-header">
     <button type="button" className="quiet-button" onClick={onLeave}>Library</button>
     <div className="reader-title"><strong>{seriesTitle}</strong><span aria-hidden="true"> — </span><h1>{chapterTitle}</h1></div>
-    <span className="spread-count">{spreadLabel}</span>
     <div className="reader-controls">
+      <span className="spread-count">{spreadLabel}</span>
       {upscalerBroken && <span className="upscale-error" role="alert">Spread upscaling isn’t working — originals are shown.</span>}
+      <button type="button" className="quiet-button" disabled={nextChapterDisabled} onClick={onNextChapter}>Next chapter <kbd>n</kbd></button>
       <button type="button" className="quiet-button" onClick={onCycleFit}>{fitOptions.find((option) => option.mode === fit)?.label} <kbd>f</kbd></button>
       <button type="button" className="quiet-button" aria-pressed={!coverSolo} onClick={onTogglePairing}>Shift pairing <kbd>p</kbd></button>
-      <div className="navigation-option">
-        <label className="navigation-option-toggle">
-          <input
-            type="checkbox"
-            checked={skipLetteredChapters}
-            disabled={toggleDisabled}
-            onChange={(event) => onSkipChange(event.target.checked)}
-          />
-          <span>Skip lettered Chapters</span>
-        </label>
-        {navigationRefreshPending && <span className="navigation-refresh-status" role="status">Refreshing navigation…</span>}
-        {navigationRefreshError && <span className="navigation-refresh-error" role="alert">
-          <span>Couldn’t refresh Chapter navigation.</span>
-          <button type="button" className="quiet-button" onClick={() => onRetryRefresh(navigationRefreshError.requestedValue)}>Retry</button>
-        </span>}
-      </div>
     </div>
   </header>;
 }
@@ -145,6 +125,44 @@ function EndCard({ chapterTitle, chapterUrl, continuationUrl, continuationPendin
     {nextError && <div className="next-chapter-failure"><p>The detected next Chapter could not be opened.</p><ErrorMessage error={nextError} retry={onRetryNext} /></div>}
     <div className="end-actions"><a href={chapterUrl} target="_blank" rel="noreferrer">Open Chapter on source site</a><button type="button" className="quiet-button" onClick={onLeave}>Back to Library</button></div>
   </section>;
+}
+
+function SpreadView({ spread, spreadNumber, widePages, pageNumbers, pageLoads, upscales, onPageError, onPageLoaded, onPageRetry, onUpscaledError }: {
+  spread: ReaderPage[];
+  spreadNumber: number;
+  widePages: Set<ReaderPage>;
+  pageNumbers: Map<string, number>;
+  pageLoads: Record<string, PageLoadState>;
+  upscales: Record<string, 'ready' | 'failed'>;
+  onPageError: (url: string, generation: number) => void;
+  onPageLoaded: (url: string, generation: number, size: PageSize) => void;
+  onPageRetry: (url: string) => void;
+  onUpscaledError: (url: string) => void;
+}) {
+  const solo = spread.length === 1;
+  const doubledWidth = solo && widePages.has(spread[0]);
+  return <section className={`spread ${solo ? 'solo' : ''} ${doubledWidth ? 'doubled-width' : ''}`} data-testid="spread" aria-label={`Spread ${spreadNumber}`}>
+    {pagesInReadingOrder(spread).map((page) => <PageMedia key={page.url} page={page} pageNumber={pageNumbers.get(page.url) ?? 0} state={pageLoads[page.url]}
+      upscaledSrc={upscales[page.url] === 'ready' ? upscaleUrl(page.url) : undefined}
+      onError={onPageError} onLoad={onPageLoaded} onRetry={onPageRetry} onUpscaledError={onUpscaledError} />)}
+  </section>;
+}
+
+function ClickZones({ navigationLocked, atEnd, atFirstSpread, hasPreviousChapter, onNext, onToggleChrome, onPrevious }: {
+  navigationLocked: boolean;
+  atEnd: boolean;
+  atFirstSpread: boolean;
+  hasPreviousChapter: boolean;
+  onNext: () => void;
+  onToggleChrome: () => void;
+  onPrevious: () => void;
+}) {
+  const cannotGoBack = !atEnd && atFirstSpread && !hasPreviousChapter;
+  return <>
+    <button type="button" className="click-zone next-zone" disabled={navigationLocked || atEnd} onClick={onNext} onPointerUp={releasePointerFocus} aria-label="Next spread" />
+    <button type="button" className="click-zone center-zone" onClick={onToggleChrome} onPointerUp={releasePointerFocus} aria-label="Toggle controls" />
+    <button type="button" className="click-zone previous-zone" disabled={navigationLocked || cannotGoBack} onClick={onPrevious} onPointerUp={releasePointerFocus} aria-label="Previous spread" />
+  </>;
 }
 
 function Filmstrip({ spreads, nextChapter, nextSpreads, activeSpreadIndex, atEnd, progress, pageNumbers, nextPageNumbers, pageLoads, navigationLocked, currentThumbnail, onSelect, onOpenNext, onPageError, onPageLoaded, onPageRetry }: {
@@ -231,13 +249,11 @@ export function App({
   const {
     opened, nextChapter, nextError, spreadIndex, atEnd, transitionPending,
     continuationUrl, continuationPending, continuationError, pageLoads,
-    skipLetteredChapters, navigationRefreshPending, navigationRefreshError,
     coverSolo, fit, chromeVisible, announceChapterChange
   } = state;
   const [measuredSizes, setMeasuredSizes] = useState<Record<string, PageSize>>({});
   const [upscales, setUpscales] = useState<Record<string, 'ready' | 'failed'>>({});
   const [upscalerBroken, setUpscalerBroken] = useState(false);
-  const navigationRefreshGeneration = useRef(0);
   const completedChapters = useRef(new Set<string>());
   const currentThumbnail = useRef<HTMLButtonElement>(null);
 
@@ -256,73 +272,45 @@ export function App({
 
   const startSession = (payload: OpenPayload) => {
     completedChapters.current.clear();
-    navigationRefreshGeneration.current += 1;
     dispatch({ type: 'session-started', payload });
   };
-  const leaveReader = () => {
-    navigationRefreshGeneration.current += 1;
-    dispatch({ type: 'session-ended' });
-  };
-
-  const openWithReaderOptions = useCallback((chapterUrl: string) => skipLetteredChapters
-    ? openChapter(chapterUrl, { skipLettered: true })
-    : openChapter(chapterUrl), [openChapter, skipLetteredChapters]);
+  const leaveReader = () => dispatch({ type: 'session-ended' });
 
   const replaceChapter = useCallback(async (chapterUrl: string, target: number | 'last', announce: boolean, presentFailure = false) => {
-    if (transitionPending || navigationRefreshPending) return;
+    if (transitionPending) return;
     dispatch({ type: 'transition-started' });
     try {
-      const payload = await openWithReaderOptions(chapterUrl);
+      const payload = await openChapter(chapterUrl);
       const targetIndex = target === 'last' ? Math.max(buildSpreads(withMeasuredSizes(payload.chapter.pages, measuredSizes), coverSolo).length - 1, 0) : target;
       dispatch({ type: 'chapter-replaced', payload, spreadIndex: targetIndex, announce });
     } catch (caught) {
       if (presentFailure) dispatch({ type: 'next-open-failed', error: caught as OpenError });
     } finally { dispatch({ type: 'transition-finished' }); }
-  }, [transitionPending, navigationRefreshPending, openWithReaderOptions, measuredSizes, coverSolo]);
+  }, [transitionPending, openChapter, measuredSizes, coverSolo]);
   const advance = useCallback(() => {
-    if (atEnd || navigationRefreshPending) return;
+    if (atEnd) return;
     if (activeSpreadIndex < spreads.length - 1) dispatch({ type: 'spread-selected', index: activeSpreadIndex + 1 });
     else if (!opened?.chapter.nextUrl || nextError) dispatch({ type: 'reached-end' });
     else void replaceChapter(opened.chapter.nextUrl, 0, true, true);
-  }, [atEnd, navigationRefreshPending, activeSpreadIndex, spreads.length, opened, nextError, replaceChapter]);
+  }, [atEnd, activeSpreadIndex, spreads.length, opened, nextError, replaceChapter]);
+  const jumpToNextChapter = useCallback(() => {
+    if (opened?.chapter.nextUrl) void replaceChapter(opened.chapter.nextUrl, 0, true, true);
+  }, [opened, replaceChapter]);
   const back = useCallback(() => {
-    if (navigationRefreshPending) return;
     if (atEnd) {
       dispatch({ type: 'end-dismissed' });
       return;
     }
     if (activeSpreadIndex > 0) dispatch({ type: 'spread-selected', index: activeSpreadIndex - 1 });
     else if (opened?.chapter.prevUrl) void replaceChapter(opened.chapter.prevUrl, 'last', false);
-  }, [navigationRefreshPending, atEnd, activeSpreadIndex, opened, replaceChapter]);
-
-  const refreshNavigation = async (requestedValue: boolean) => {
-    if (!opened || navigationRefreshPending) return;
-    const chapterUrl = opened.chapter.url;
-    const generation = navigationRefreshGeneration.current + 1;
-    navigationRefreshGeneration.current = generation;
-    dispatch({ type: 'navigation-refresh-started' });
-    try {
-      const payload = await peekChapter(chapterUrl, {
-        ...(requestedValue ? { skipLettered: true } : {}),
-        retainAsCurrent: true
-      });
-      if (navigationRefreshGeneration.current !== generation || payload.chapter.url !== chapterUrl) return;
-      dispatch({ type: 'navigation-refreshed', chapterUrl, chapter: payload.chapter, requestedValue });
-    } catch (caught) {
-      if (navigationRefreshGeneration.current === generation) {
-        dispatch({ type: 'navigation-refresh-failed', chapterUrl, failure: { error: caught as OpenError, requestedValue } });
-      }
-    } finally {
-      if (navigationRefreshGeneration.current === generation) dispatch({ type: 'navigation-refresh-finished' });
-    }
-  };
+  }, [atEnd, activeSpreadIndex, opened, replaceChapter]);
 
   const continueManually = async (event?: FormEvent) => {
     event?.preventDefault();
     if (!continuationUrl || continuationPending) return;
     dispatch({ type: 'continuation-started' });
     try {
-      dispatch({ type: 'continuation-succeeded', payload: await openWithReaderOptions(continuationUrl) });
+      dispatch({ type: 'continuation-succeeded', payload: await openChapter(continuationUrl) });
     } catch (caught) {
       dispatch({ type: 'continuation-failed', error: caught as OpenError });
     }
@@ -355,13 +343,13 @@ export function App({
     dispatch({ type: 'next-peek-started' });
     if (!nextUrl) return;
     let current = true;
-    void (skipLetteredChapters ? peekChapter(nextUrl, { skipLettered: true }) : peekChapter(nextUrl)).then((payload) => {
+    void peekChapter(nextUrl).then((payload) => {
       if (current && payload.chapter.url === nextUrl) dispatch({ type: 'next-chapter-loaded', chapter: payload.chapter });
     }).catch((caught) => {
       if (current) dispatch({ type: 'next-peek-failed', error: caught as OpenError });
     });
     return () => { current = false; };
-  }, [opened?.chapter.url, opened?.chapter.nextUrl, peekChapter, skipLetteredChapters]);
+  }, [opened?.chapter.url, opened?.chapter.nextUrl, peekChapter]);
 
   useEffect(() => {
     if (!opened || spreads.length === 0 || activeSpreadIndex !== spreads.length - 1) return;
@@ -378,6 +366,8 @@ export function App({
     } else if (event.key === 'ArrowRight') {
       event.preventDefault();
       back();
+    } else if (event.key.toLowerCase() === 'n') {
+      jumpToNextChapter();
     } else if (event.key.toLowerCase() === 'f') {
       dispatch({ type: 'fit-cycled' });
     } else if (event.key.toLowerCase() === 'p') {
@@ -414,7 +404,6 @@ export function App({
   if (opened) {
     const spread = spreads[activeSpreadIndex];
     const progress = atEnd ? 100 : Math.round(((activeSpreadIndex + 1) / spreads.length) * 100);
-    const doubledWidth = spread.length === 1 && widePages.has(spread[0]);
     return <main className={`reader-shell ${chromeVisible ? '' : 'immersive'}`}>
       {announceChapterChange && <div className="chapter-toast" role="status">Now reading {opened.chapter.title}</div>}
       {chromeVisible && <ReaderHeader
@@ -424,15 +413,11 @@ export function App({
         upscalerBroken={upscalerBroken}
         fit={fit}
         coverSolo={coverSolo}
-        skipLetteredChapters={skipLetteredChapters}
-        toggleDisabled={navigationRefreshPending || transitionPending}
-        navigationRefreshPending={navigationRefreshPending}
-        navigationRefreshError={navigationRefreshError}
+        nextChapterDisabled={transitionPending || !opened.chapter.nextUrl}
         onLeave={leaveReader}
+        onNextChapter={jumpToNextChapter}
         onCycleFit={() => dispatch({ type: 'fit-cycled' })}
         onTogglePairing={() => dispatch({ type: 'pairing-toggled' })}
-        onSkipChange={(requestedValue) => { void refreshNavigation(requestedValue); }}
-        onRetryRefresh={(requestedValue) => { void refreshNavigation(requestedValue); }}
       />}
 
       <section className={`reader-stage fit-${fit}`} data-testid="reader-stage">
@@ -447,22 +432,32 @@ export function App({
             onUrlChange={(value) => dispatch({ type: 'continuation-url-changed', value })}
             onContinue={(event) => { void continueManually(event); }}
             onRetryContinue={() => { void continueManually(); }}
-            onRetryNext={() => { if (opened.chapter.nextUrl) void replaceChapter(opened.chapter.nextUrl, 0, true, true); }}
+            onRetryNext={jumpToNextChapter}
             onLeave={leaveReader}
-          /> : <section className={`spread ${spread.length === 1 ? 'solo' : ''} ${doubledWidth ? 'doubled-width' : ''}`} data-testid="spread" aria-label={`Spread ${activeSpreadIndex + 1}`}>
-            {pagesInReadingOrder(spread).map((page) => {
-              const pageNumber = pageNumbers.get(page.url) ?? 0;
-              return <PageMedia key={page.url} page={page} pageNumber={pageNumber} state={pageLoads[page.url]}
-                upscaledSrc={upscales[page.url] === 'ready' ? upscaleUrl(page.url) : undefined}
-                onError={pageError} onLoad={pageLoaded} onRetry={retryPage} onUpscaledError={upscaleFailed} />;
-            })}
-          </section>}
+          /> : <SpreadView
+            spread={spread}
+            spreadNumber={activeSpreadIndex + 1}
+            widePages={widePages}
+            pageNumbers={pageNumbers}
+            pageLoads={pageLoads}
+            upscales={upscales}
+            onPageError={pageError}
+            onPageLoaded={pageLoaded}
+            onPageRetry={retryPage}
+            onUpscaledError={upscaleFailed}
+          />}
         </div>
         {pendingUpscales.map((page) => <img key={page.url} className="upscale-loader" hidden alt="" src={upscaleUrl(page.url)}
           onLoad={() => upscaleLoaded(page.url)} onError={() => upscaleFailed(page.url)} />)}
-        <button type="button" className="click-zone next-zone" disabled={transitionPending || navigationRefreshPending || atEnd} onClick={advance} onPointerUp={releasePointerFocus} aria-label="Next spread" />
-        <button type="button" className="click-zone center-zone" onClick={() => dispatch({ type: 'chrome-toggled' })} onPointerUp={releasePointerFocus} aria-label="Toggle controls" />
-        <button type="button" className="click-zone previous-zone" disabled={transitionPending || navigationRefreshPending || (!atEnd && activeSpreadIndex === 0 && !opened.chapter.prevUrl)} onClick={back} onPointerUp={releasePointerFocus} aria-label="Previous spread" />
+        <ClickZones
+          navigationLocked={transitionPending}
+          atEnd={atEnd}
+          atFirstSpread={activeSpreadIndex === 0}
+          hasPreviousChapter={Boolean(opened.chapter.prevUrl)}
+          onNext={advance}
+          onToggleChrome={() => dispatch({ type: 'chrome-toggled' })}
+          onPrevious={back}
+        />
       </section>
 
       {chromeVisible && <Filmstrip
@@ -475,7 +470,7 @@ export function App({
         pageNumbers={pageNumbers}
         nextPageNumbers={nextPageNumbers}
         pageLoads={pageLoads}
-        navigationLocked={transitionPending || navigationRefreshPending}
+        navigationLocked={transitionPending}
         currentThumbnail={currentThumbnail}
         onSelect={(index) => dispatch({ type: 'spread-selected', index })}
         onOpenNext={(chapterUrl, index) => { void replaceChapter(chapterUrl, index, true, true); }}

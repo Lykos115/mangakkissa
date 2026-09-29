@@ -94,9 +94,8 @@ export function createApp({ store, fetcher = fetch, clientDir, imageCacheMaxByte
       response.status(400).json({ error: 'FETCH_FAILED', detail: 'A valid HTTP or HTTPS Chapter URL is required.' });
       return;
     }
-    const skipLettered = request.body?.skipLettered === true;
     try {
-      const resolved = await extractions.resolve(chapterUrl, skipLettered);
+      const resolved = await extractions.resolve(chapterUrl);
       const { chapter } = resolved;
       const recorded = await store.recordOpen(
         { key: chapter.seriesKey, title: chapter.seriesTitle },
@@ -123,10 +122,8 @@ export function createApp({ store, fetcher = fetch, clientDir, imageCacheMaxByte
       response.status(400).json({ error: 'FETCH_FAILED', detail: 'A valid HTTP or HTTPS Chapter URL is required.' });
       return;
     }
-    const skipLettered = request.query.skipLettered === '1';
-    const retainAsCurrent = request.query.current === '1';
     try {
-      const resolved = await extractions.resolve(chapterUrl, skipLettered);
+      const resolved = await extractions.resolve(chapterUrl);
       const { chapter } = resolved;
       const existing = store.findSeries(chapter.seriesKey);
       response.json({
@@ -139,8 +136,7 @@ export function createApp({ store, fetcher = fetch, clientDir, imageCacheMaxByte
         reread: existing?.chapters.some((entry) => entry.url === chapter.url) ?? false,
         upscaler: upscalerStatus
       } satisfies OpenPayload);
-      if (retainAsCurrent) extractions.retainWindow(resolved);
-      else extractions.evictUnretained();
+      extractions.evictUnretained();
     } catch (error) {
       extractions.evictUnretained();
       sendChapterFailure(response, error);
