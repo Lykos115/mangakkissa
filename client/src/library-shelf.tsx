@@ -53,6 +53,28 @@ const resumeTitle = (series: LibrarySeries) =>
 
 const lastRead = (series: LibrarySeries) => new Date(series.lastReadAt).toLocaleDateString();
 
+const boothNumber = (index: number) => String(index + 1).padStart(2, '0');
+
+const caughtUp = (series: LibrarySeries) => {
+  const { done, total } = progressOf(series);
+  return total > 0 && done === total;
+};
+
+// The member's card: quiet Library stats in place of a dashboard.
+function MemberCard({ series }: { series: LibrarySeries[] }) {
+  const chaptersRead = series.reduce((sum, entry) => sum + progressOf(entry).done, 0);
+  const since = series.reduce((earliest, entry) => entry.addedAt < earliest ? entry.addedAt : earliest, series[0].addedAt);
+  return <div className="member-card">
+    <p className="member-brand">Member's card <span lang="ja">会員証</span></p>
+    <p className="member-number">No. 0001</p>
+    <dl>
+      <div><dt>Booths</dt><dd>{series.length}</dd></div>
+      <div><dt>Chapters read</dt><dd>{chaptersRead}</dd></div>
+      <div><dt>Regular since</dt><dd>{new Date(since).toLocaleDateString(undefined, { month: 'short', year: 'numeric' })}</dd></div>
+    </dl>
+  </div>;
+}
+
 interface ShelfApi {
   getLibrary: typeof defaultGetLibrary;
   openChapter: typeof defaultOpenChapter;
@@ -155,7 +177,7 @@ function PasteBar({ openChapter, onOpened }: { openChapter: typeof defaultOpenCh
     }
   };
   return <form className="shelf-paste" onSubmit={(event) => { void submit(event); }}>
-    <input type="url" required value={url} aria-label="Chapter URL" placeholder="Paste a Chapter URL to add it to the shelf…"
+    <input type="url" required value={url} aria-label="Chapter URL" placeholder="Check in — paste a Chapter URL for a new booth…"
       onChange={(event) => setUrl(event.target.value)} />
     <button type="submit" disabled={pending}>{pending ? 'Opening…' : 'Open'}</button>
     {error && <ErrorMessage error={error} retry={() => { void submit(); }} />}
@@ -230,8 +252,9 @@ function CoverPicker({ series, peekChapter, onPick, onClose }: {
   </dialog>;
 }
 
-function SeriesScreen({ series, data, api, coverPageUrl, onBack }: {
+function SeriesScreen({ series, booth, data, api, coverPageUrl, onBack }: {
   series: LibrarySeries;
+  booth: string;
   data: LibraryData;
   api: ShelfApi;
   coverPageUrl?: string;
@@ -244,7 +267,7 @@ function SeriesScreen({ series, data, api, coverPageUrl, onBack }: {
   const openError = seriesErrors[series.key];
   return <>
     <header className="shelf-topbar">
-      <button type="button" className="quiet-button shelf-back" onClick={onBack}>← The Shelf</button>
+      <button type="button" className="quiet-button shelf-back" onClick={onBack}>← The Lobby</button>
     </header>
     <section className="shelf-hero">
       <div className="shelf-cover-wrap">
@@ -253,7 +276,7 @@ function SeriesScreen({ series, data, api, coverPageUrl, onBack }: {
           aria-label={`Change cover for ${series.title}`}>Change cover</button>
       </div>
       <div className="shelf-hero-copy">
-        <p className="eyebrow">On the shelf</p>
+        <p className="eyebrow">Booth {booth} <span lang="ja">個室</span> · {caughtUp(series) ? 'caught up' : 'reading'}</p>
         {editing?.key === series.key
           ? <form className="shelf-rename" onSubmit={(event) => { void saveTitle(event, series.key); }}>
               <input required value={editing.title} aria-label="Series title" autoFocus
@@ -316,22 +339,26 @@ export function LibraryShelf({
   const selected = library.series.find((series) => series.key === selectedKey);
 
   if (selected && !loading && !error) {
-    return <SeriesScreen series={selected} data={data} api={api} coverPageUrl={coverOf(selected)} onBack={() => select(undefined)} />;
+    return <SeriesScreen series={selected} booth={boothNumber(library.series.indexOf(selected))} data={data} api={api} coverPageUrl={coverOf(selected)} onBack={() => select(undefined)} />;
   }
 
   return <>
+    <div className="noren" aria-hidden="true">{['漫', '画', '喫', '茶'].map((glyph) => <span key={glyph}>{glyph}</span>)}</div>
     <header className="shelf-topbar">
-      <h1><span className="eyebrow">Local manga reader</span>The Shelf</h1>
+      <h1><span className="eyebrow">Manga kissa · open 24h · quiet floor</span>The Lobby</h1>
       <PasteBar openChapter={openChapter} onOpened={onOpened} />
     </header>
+    {!loading && !error && library.series.length > 0 && <MemberCard series={library.series} />}
     {loading && <p className="library-status">Loading Library…</p>}
     {error && <ErrorMessage error={error} retry={() => { data.dispatch({ type: 'library-refresh-started' }); void refresh(); }} />}
     {!loading && !error && library.series.length === 0 && <p className="library-status">No Series yet. Open a Chapter to begin.</p>}
     {!loading && !error && <div className="shelf-grid">
-      {library.series.map((series) => {
+      {library.series.map((series, index) => {
         const progress = progressOf(series);
         const openError = seriesErrors[series.key];
         return <article className="shelf-card" key={series.key} aria-label={series.title}>
+          <span className="booth-plate" aria-hidden="true">{boothNumber(index)}</span>
+          <span className={`booth-lamp ${caughtUp(series) ? 'free' : 'busy'}`} aria-hidden="true">{caughtUp(series) ? 'caught up' : 'reading'}</span>
           <button type="button" className="shelf-cover-button"
             onClick={() => select(series.key)}
             aria-label={`Open ${series.title}`}>

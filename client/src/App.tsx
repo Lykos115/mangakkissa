@@ -134,7 +134,7 @@ function EndCard({ chapterTitle, chapterUrl, continuationUrl, continuationPendin
   onLeave: () => void;
 }) {
   return <section className="end-card" aria-labelledby="end-card-title">
-    <p className="eyebrow">Chapter complete</p>
+    <p className="eyebrow">Drink bar <span lang="ja">ドリンクバー</span> · Chapter complete</p>
     <h2 id="end-card-title">End of {chapterTitle} — no next chapter found.</h2>
     <p>If there is one, paste its URL:</p>
     <form className="continuation-form" onSubmit={onContinue}>
